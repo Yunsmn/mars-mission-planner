@@ -8,6 +8,7 @@ pyproj>=3.6
 
 # Local model (Gemma 4 via Ollama)
 ollama>=0.3
+requests>=2.31
 
 # Config + misc
 pyyaml>=6.0
