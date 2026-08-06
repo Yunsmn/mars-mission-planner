@@ -53,6 +53,11 @@ Run it: `.venv/bin/python -m demo.run` · tests: `.venv/bin/python -m pytest`.
    shows the standout moments for a ≤3-min video: reject-a-risky-plan, replan-on-new-
    perception, and a battery-vs-science tradeoff. Deterministic via the config seed.
 
+8. **Write the README (yours to author).** Replace the stub `README.md` with the real
+   submission front-door: problem, solution, architecture, the real space data used, how to
+   run it, the demo, and the required **"How IBM Bob was used"** section. Be accurate about
+   which parts you built (the planning brain) vs. the assistant-scaffolded simulation.
+
 ## Non-negotiable invariants
 
 - The model proposes; the verify-gate disposes. The model never executes actions.
