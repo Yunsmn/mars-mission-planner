@@ -1,0 +1,36 @@
+# MARVIN mission configuration. All tunables live here (no magic numbers in code).
+
+mission:
+  objective: "Characterize the outcrop to the NE; cache 2 high-value samples; keep battery > reserve."
+  site: jezero            # data tile selected in docs/DATA.md
+
+constraints:
+  battery_reserve_pct: 15.0   # never plan below this
+  risk_ceiling: 0.10          # max acceptable tail (worst-10%) hazard for an action
+  p_success_min: 0.70         # min mean success probability to consider an action
+
+planner:
+  n_candidates: 3             # action sequences the model proposes per decision
+  n_rollouts: 20              # surrogate rollouts per candidate
+  horizon_steps: 100          # rollout horizon
+  cvar_quantile: 0.90         # tail definition for CVaR (worst 10%)
+  voi_gap_threshold: 0.15     # if best two candidates are closer than this, consider observing
+  seed: 42                    # deterministic demo
+
+model:
+  name: gemma4                # local model via Ollama (per user: Gemma 4, NOT gemma3:4b)
+  host: http://localhost:11434
+  temperature: 0.7            # some diversity across the k proposals
+
+power:
+  source: solar               # justifies dust-opacity -> energy coupling
+  nominal_charge_w: 100.0
+  dust_tau_reference: 0.5     # baseline optical depth; higher tau -> less charge
+
+data:
+  dem_path:      data/derived/jezero_dem.npy
+  ortho_path:    data/derived/jezero_ortho.png
+  slope_path:    data/derived/jezero_slope.npy
+  mineral_path:  data/derived/jezero_science_value.npy   # from CRISM MTRDR
+  dust_path:     data/derived/dust_tau_series.csv        # from MEDA/REMS
+  meters_per_cell: 6.0        # CTX-scale to keep tiles light on disk

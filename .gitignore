@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Data — heavy assets are fetched/derived, not committed (see docs/DATA.md)
+data/raw/
+data/derived/
+*.IMG
+*.tif
+*.tiff
+*.img
+*.lbl
+!data/samples/**   # small committed sample tiles only
+
+# Models / weights
+*.gguf
+model/weights/
+
+# MuJoCo / sim artifacts
+*.mjb
+MUJOCO_LOG.TXT
+demo/out/
+*.mp4
+*.png
+!docs/**/*.png      # keep doc figures
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

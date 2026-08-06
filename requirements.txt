@@ -1,0 +1,19 @@
+# Core simulation + numerics
+mujoco>=3.1
+numpy>=1.26
+
+# Geospatial data (DEM / ortho / mineral rasters)
+rasterio>=1.3
+pyproj>=3.6
+
+# Local model (Gemma 4 via Ollama)
+ollama>=0.3
+
+# Config + misc
+pyyaml>=6.0
+
+# Demo / visualization
+matplotlib>=3.8
+
+# Dev / test
+pytest>=8.0
