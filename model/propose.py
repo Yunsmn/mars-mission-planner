@@ -3,21 +3,253 @@
 It never executes anything. Malformed or invalid proposals are dropped, never crash the loop.
 The surrogate + gate are what make trusting a local model acceptable.
 
-TODO(bob): implement (task B9).
+Authored by IBM Bob for the MARVIN mission planner.
 """
 from __future__ import annotations
 
-from common.types import ActionSeq, MissionState, Perception
+import json
+import logging
+from typing import Any
+
+import requests
+
+from common.types import Action, ActionKind, ActionSeq, MissionState, Perception
+
+logger = logging.getLogger(__name__)
 
 
 class Proposer:
+    """Gemma 4 proposer via Ollama API."""
+    
     def __init__(self, name: str, host: str, temperature: float) -> None:
         self.name = name
         self.host = host
         self.temperature = temperature
-
+        self.endpoint = f"{host}/api/generate"
+    
     def propose(self, state: MissionState, perception: Perception, k: int) -> list[ActionSeq]:
-        """Query Gemma 4 for k candidate action sequences; parse + validate to schema."""
-        raise NotImplementedError(
-            "TODO(bob): call Ollama, parse structured output, drop invalid candidates"
-        )
+        """Query Gemma 4 for k candidate action sequences; parse + validate to schema.
+        
+        Args:
+            state: Current mission state (pose, battery, targets, etc.)
+            perception: Current perception (slope, roughness, visible targets)
+            k: Number of candidate sequences to generate
+        
+        Returns:
+            List of valid ActionSeq tuples (may be < k if some are invalid)
+        """
+        prompt = self._build_prompt(state, perception, k)
+        
+        try:
+            response = self._call_ollama(prompt)
+            candidates = self._parse_response(response, state, perception)
+            
+            # Limit to k candidates
+            return candidates[:k]
+            
+        except Exception as e:
+            logger.error(f"Proposer failed: {e}")
+            # Return safe fallback: HOLD action
+            return [self._safe_hold()]
+    
+    def _build_prompt(self, state: MissionState, perception: Perception, k: int) -> str:
+        """Build the prompt for Gemma 4."""
+        # Format visible targets
+        targets_str = "\n".join([
+            f"  - {t.id}: xy=({t.xy[0]:.1f}, {t.xy[1]:.1f}), "
+            f"science_value={t.science_value:.2f}, mineral={t.mineral_class}"
+            for t in perception.visible_targets
+        ])
+        
+        # Format already collected
+        collected_str = ", ".join(state.collected) if state.collected else "none"
+        
+        prompt = f"""You are the onboard planner for a Mars rover. Propose {k} candidate action sequences.
+
+CURRENT STATE:
+- Position: ({state.pose.xy[0]:.1f}, {state.pose.xy[1]:.1f})
+- Heading: {state.pose.heading_rad:.2f} rad
+- Battery: {state.battery_pct:.1f}%
+- Localization uncertainty: {state.localization_sigma:.2f} m
+- Sol time: {state.sol_time:.2f}
+- Collected samples: {collected_str}
+
+VISIBLE TARGETS:
+{targets_str}
+
+PERCEPTION:
+- Dust opacity (tau): {perception.dust_tau:.2f}
+- Terrain: slope and roughness maps available
+
+AVAILABLE ACTIONS:
+1. DRIVE to (x, y) - navigate to coordinates
+2. SAMPLE target_id - collect sample at current location
+3. SCAN - refresh perception
+4. OBSERVE - take additional observation to reduce uncertainty
+5. HOLD - safe default, do nothing
+
+CONSTRAINTS:
+- Battery reserve: must keep >15% battery
+- Risk ceiling: avoid high-slope/rough terrain
+- Prioritize high science value targets
+
+Generate {k} diverse candidate sequences. Each sequence should be 1-5 actions.
+Consider: direct routes, cautious routes with scans, high-value vs safe targets.
+
+OUTPUT FORMAT (JSON array of sequences):
+[
+  [
+    {{"action": "DRIVE", "params": {{"xy": [x, y]}}}},
+    {{"action": "SAMPLE", "params": {{"target": "target_id"}}}}
+  ],
+  [
+    {{"action": "SCAN", "params": {{}}}},
+    {{"action": "DRIVE", "params": {{"xy": [x, y]}}}},
+    {{"action": "SAMPLE", "params": {{"target": "target_id"}}}}
+  ]
+]
+
+Respond with ONLY the JSON array, no other text.
+"""
+        return prompt
+    
+    def _call_ollama(self, prompt: str) -> str:
+        """Call Ollama API and return the response text."""
+        payload = {
+            "model": self.name,
+            "prompt": prompt,
+            "temperature": self.temperature,
+            "stream": False
+        }
+        
+        try:
+            response = requests.post(
+                self.endpoint,
+                json=payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            return result.get("response", "")
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Ollama API call failed: {e}")
+            raise
+    
+    def _parse_response(
+        self,
+        response: str,
+        state: MissionState,
+        perception: Perception
+    ) -> list[ActionSeq]:
+        """Parse and validate the model's response into ActionSeq tuples.
+        
+        Drops malformed or invalid proposals without crashing.
+        """
+        candidates = []
+        
+        try:
+            # Extract JSON from response (model might add extra text)
+            json_start = response.find('[')
+            json_end = response.rfind(']') + 1
+            
+            if json_start == -1 or json_end == 0:
+                logger.warning("No JSON array found in response")
+                return [self._safe_hold()]
+            
+            json_str = response[json_start:json_end]
+            sequences = json.loads(json_str)
+            
+            if not isinstance(sequences, list):
+                logger.warning("Response is not a list")
+                return [self._safe_hold()]
+            
+            # Parse each sequence
+            for seq_data in sequences:
+                if not isinstance(seq_data, list):
+                    continue
+                
+                actions = []
+                valid = True
+                
+                for action_data in seq_data:
+                    action = self._parse_action(action_data, state, perception)
+                    if action is None:
+                        valid = False
+                        break
+                    actions.append(action)
+                
+                if valid and actions:
+                    candidates.append(tuple(actions))
+            
+            # If no valid candidates, return safe hold
+            if not candidates:
+                candidates = [self._safe_hold()]
+            
+            return candidates
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parse error: {e}")
+            return [self._safe_hold()]
+        except Exception as e:
+            logger.error(f"Response parsing failed: {e}")
+            return [self._safe_hold()]
+    
+    def _parse_action(
+        self,
+        action_data: dict[str, Any],
+        state: MissionState,
+        perception: Perception
+    ) -> Action | None:
+        """Parse a single action from JSON data."""
+        try:
+            action_name = action_data.get("action", "").upper()
+            params = action_data.get("params", {})
+            
+            # Map action name to ActionKind
+            if action_name == "DRIVE":
+                kind = ActionKind.DRIVE
+                # Validate xy coordinates
+                xy = params.get("xy")
+                if not isinstance(xy, (list, tuple)) or len(xy) != 2:
+                    return None
+                params = {"xy": tuple(xy)}
+                
+            elif action_name == "SAMPLE":
+                kind = ActionKind.SAMPLE
+                # Validate target exists
+                target_id = params.get("target")
+                if not target_id:
+                    return None
+                # Check if target is visible or already collected
+                valid_targets = [t.id for t in perception.visible_targets]
+                if target_id not in valid_targets and target_id not in state.collected:
+                    return None
+                params = {"target": target_id}
+                
+            elif action_name == "SCAN":
+                kind = ActionKind.SCAN
+                params = {}
+                
+            elif action_name == "OBSERVE":
+                kind = ActionKind.OBSERVE
+                params = {}
+                
+            elif action_name == "HOLD":
+                kind = ActionKind.HOLD
+                params = {}
+                
+            else:
+                logger.warning(f"Unknown action: {action_name}")
+                return None
+            
+            return Action(kind=kind, params=params)
+            
+        except Exception as e:
+            logger.error(f"Action parsing failed: {e}")
+            return None
+    
+    def _safe_hold(self) -> ActionSeq:
+        """Return a safe HOLD action sequence as fallback."""
+        return (Action(kind=ActionKind.HOLD, params={}),)
