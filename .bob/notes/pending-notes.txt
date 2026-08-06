@@ -25,3 +25,6 @@
 {"id":"4b328754-691f-47b0-aaf1-f501a5328e7b","ts":"2026-08-06T14:51:16.996Z","path":"/home/phecda/projects/mars-mission-planner/planner/loop.py","version":"1.0.0","taskID":"a141c82e-f235-493e-98cb-41cbf1150ddf"}
 {"id":"185fe2e0-78ad-443c-b6fe-10512042595d","ts":"2026-08-06T14:52:05.763Z","path":"/home/phecda/projects/mars-mission-planner/config.yaml","version":"1.0.0","taskID":"a141c82e-f235-493e-98cb-41cbf1150ddf"}
 {"id":"a220b205-3c61-4821-9fa4-82ceecdb102c","ts":"2026-08-06T14:52:59.193Z","path":"/home/phecda/projects/mars-mission-planner/test_integration.py","version":"1.0.0","taskID":"a141c82e-f235-493e-98cb-41cbf1150ddf"}
+{"id":"585969bd-4517-4fda-812f-6fbb6463dc20","ts":"2026-08-06T14:58:50.356Z","path":"/home/phecda/projects/mars-mission-planner/model/propose.py","version":"1.0.0","taskID":"a141c82e-f235-493e-98cb-41cbf1150ddf"}
+{"id":"1ac7e1a0-bcd4-4057-9373-21e5f40f5e4a","ts":"2026-08-06T14:59:09.346Z","path":"/home/phecda/projects/mars-mission-planner/test_demo_integration.py","version":"1.0.0","taskID":"a141c82e-f235-493e-98cb-41cbf1150ddf"}
+{"id":"c3637d7b-98c0-4f0b-b869-2e8d72d71b4e","ts":"2026-08-06T14:59:36.786Z","path":"/home/phecda/projects/mars-mission-planner/test_demo_integration.py","version":"1.0.0","taskID":"a141c82e-f235-493e-98cb-41cbf1150ddf"}

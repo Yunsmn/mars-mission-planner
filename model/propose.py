@@ -131,11 +131,11 @@ Respond with ONLY the JSON array, no other text.
         }
         
         try:
-            response = requests.post(
-                self.endpoint,
-                json=payload,
-                timeout=30
-            )
+\1response = requests.post(
+\1    self.endpoint,
+\1    json=payload,
+\1    timeout=120  # Increased for slower models
+\1)
             response.raise_for_status()
             
             result = response.json()
