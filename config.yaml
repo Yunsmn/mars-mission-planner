@@ -18,7 +18,7 @@ planner:
   seed: 42                    # deterministic demo
 
 model:
-  name: gemma2:2b              # local model via Ollama (using gemma2:2b, latest available)
+  name: gemma3:4b              # local model via Ollama (gemma3:4b for better reasoning)
   host: http://localhost:11434
   temperature: 0.7            # some diversity across the k proposals
 

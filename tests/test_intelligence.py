@@ -300,9 +300,8 @@ class TestVoI:
         """Test observation cost calculation."""
         scan = Action(kind=ActionKind.SCAN, params={})
         observe = Action(kind=ActionKind.OBSERVE, params={})
-        
-        scan_cost = voi.cost(scan)
-        observe_cost = voi.cost(observe)
+        scan_cost = voi.observation_cost(scan)
+        observe_cost = voi.observation_cost(observe)
         
         # SCAN should be more expensive than OBSERVE
         assert scan_cost > observe_cost

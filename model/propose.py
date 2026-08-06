@@ -131,11 +131,11 @@ Respond with ONLY the JSON array, no other text.
         }
         
         try:
-\1response = requests.post(
-\1    self.endpoint,
-\1    json=payload,
-\1    timeout=120  # Increased for slower models
-\1)
+            response = requests.post(
+                self.endpoint,
+                json=payload,
+                timeout=300  # Increased timeout for gemma3:4b (5 minutes)
+            )
             response.raise_for_status()
             
             result = response.json()

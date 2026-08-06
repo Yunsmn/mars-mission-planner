@@ -39,7 +39,8 @@ def decide_next_action(
     perception: Perception,
     env: surrogate.SurrogateEnv,
     model,
-    cfg: dict
+    cfg: dict,
+    consecutive_observations: int = 0
 ) -> Decision:
     """The core propose-and-verify loop for one decision cycle.
     
@@ -56,8 +57,9 @@ def decide_next_action(
         state: Current mission state
         perception: Current perception from sensors
         env: Surrogate environment for rollouts
-        model: Proposer (Gemma 4 via Ollama)
+        model: Proposer (Gemma 3 via Ollama)
         cfg: Configuration dict
+        consecutive_observations: Number of consecutive observations taken
     
     Returns:
         Decision with chosen action, rationale, and candidate scores
@@ -114,11 +116,14 @@ def decide_next_action(
     logger.info(f"Safe candidates: {len(safe)}/{len(scores)}")
     
     # STEP 5: VoI - check if observation would help
-    if safe:
+    # Only consider observation if we haven't exceeded the budget
+    max_consecutive_obs = cfg.get('max_consecutive_observations', 2)
+    
+    if safe and consecutive_observations < max_consecutive_obs:
         obs_action = voi.maybe_observe(safe, state, perception, env, cfg)
         
         if obs_action is not None:
-            logger.info("VoI gate triggered: observation recommended")
+            logger.info(f"VoI gate triggered: observation recommended (consecutive: {consecutive_observations + 1}/{max_consecutive_obs})")
             rationale = justify.justify(obs_action, scores, model)
             return Decision(
                 action=obs_action,
@@ -196,6 +201,7 @@ def run_mission(
     decisions = []
     total_energy = 0.0
     last_perception = None
+    consecutive_observations = 0
     
     # Mission loop
     for step in range(max_steps):
@@ -206,12 +212,15 @@ def run_mission(
         current_pose = cap.get_pose()
         current_battery = cap.battery()
         
-        # Build mission state
+        # Build mission state with updated localization uncertainty
+        # Reduce uncertainty after observations
+        loc_sigma = max(0.1, 1.0 - (consecutive_observations * 0.3))
+        
         state = MissionState(
             pose=current_pose,
             battery_pct=current_battery,
             sol_time=step * 0.1,  # Rough time estimate
-            localization_sigma=1.0,  # Would come from sensors in full impl
+            localization_sigma=loc_sigma,
             collected=tuple(t.id for t in world.targets if t.collected),
             remaining=tuple(current_perception.visible_targets)
         )
@@ -219,7 +228,8 @@ def run_mission(
         logger.info(
             f"State: pos=({state.pose.xy[0]:.1f}, {state.pose.xy[1]:.1f}), "
             f"battery={state.battery_pct:.1f}%, "
-            f"collected={len(state.collected)}"
+            f"collected={len(state.collected)}, "
+            f"loc_sigma={state.localization_sigma:.2f}"
         )
         
         # Check for replanning triggers
@@ -231,7 +241,7 @@ def run_mission(
         env = surrogate.create_surrogate_env(world, cfg)
         
         # DECIDE - propose-and-verify loop
-        decision = decide_next_action(state, current_perception, env, model, cfg)
+        decision = decide_next_action(state, current_perception, env, model, cfg, consecutive_observations)
         decisions.append(decision)
         
         # Log decision
@@ -240,6 +250,12 @@ def run_mission(
         
         # EXECUTE - call capability API
         action = decision.action
+        
+        # Track consecutive observations
+        if action.kind in (ActionKind.OBSERVE, ActionKind.SCAN):
+            consecutive_observations += 1
+        else:
+            consecutive_observations = 0  # Reset on action execution
         
         if action.kind == ActionKind.DRIVE:
             xy = action.params['xy']
@@ -304,7 +320,7 @@ def run_mission(
         pose=final_pose,
         battery_pct=final_battery,
         sol_time=step * 0.1,
-        localization_sigma=1.0,
+        localization_sigma=loc_sigma,
         collected=tuple(t.id for t in world.targets if t.collected),
         remaining=tuple(final_perception.visible_targets)
     )

@@ -98,23 +98,19 @@ def voi(obs: Action, state: MissionState, env) -> float:
     return base_voi
 
 
-def cost(obs: Action) -> float:
-    """Energy/time price of the observation.
+def observation_cost(obs: Action) -> float:
+    """Energy/time cost of an observation action.
     
     Args:
         obs: The observation action
     
     Returns:
-        Cost in energy units (Wh) or equivalent value units
+        Cost in comparable units to action value
     """
     if obs.kind == ActionKind.SCAN:
-        # SCAN is more expensive (full perception refresh)
-        return 5.0 * 0.01  # 5 Wh * energy_penalty_factor
-    
+        return 0.01  # Battery % cost for full scan
     elif obs.kind == ActionKind.OBSERVE:
-        # OBSERVE is cheaper (targeted)
-        return 2.0 * 0.01  # 2 Wh * energy_penalty_factor
-    
+        return 0.005  # Battery % cost for targeted observation
     return 0.0
 
 
@@ -125,83 +121,104 @@ def maybe_observe(
     env,
     cfg: dict
 ) -> Action | None:
-    """Return an OBSERVE action if voi(obs) > cost(obs) and the decision is ambiguous.
+    """Decide whether to observe before acting.
     
-    This is the core VoI gate: only observe when:
-    1. The decision is ambiguous (small gap between top candidates)
-    2. The expected value of information exceeds the cost
+    Returns an observation action if:
+    1. The best two candidates are close in value (ambiguous decision)
+    2. The expected VoI exceeds the observation cost
+    3. We haven't exceeded the observation budget for this mission
     
     Args:
         safe: List of safe candidate scores
         state: Current mission state
         perception: Current perception
-        env: Environment for VoI calculation
-        cfg: Configuration with voi_gap_threshold
+        env: Environment
+        cfg: Configuration dict
     
     Returns:
-        An observation Action if VoI justifies it, None otherwise
+        An observation action if VoI justifies it, None otherwise
     """
-    # Check if decision is ambiguous
+    # Don't observe if we have no safe candidates or only one
+    if len(safe) < 2:
+        return None
+    
+    # Check observation budget (prevent infinite loops)
+    # Track observations in mission state or config
+    max_consecutive_observations = cfg.get('max_consecutive_observations', 2)
+    
+    # Simple heuristic: if localization uncertainty is very low, don't observe
+    # (indicates we've already done enough observations)
+    if state.localization_sigma < 0.5:
+        return None
+    
+    # Calculate value gap between top candidates
     gap = best_gap(safe)
     threshold = cfg.get('voi_gap_threshold', 0.15)
     
+    # Only consider observation if decision is ambiguous
     if gap >= threshold:
-        # Decision is clear, no need to observe
         return None
     
-    # Decision is ambiguous, consider observing
+    # Get cheapest useful observation
     obs = cheapest_observation(state, perception)
-    
     if obs is None:
         return None
     
     # Calculate VoI vs cost
-    obs_voi = voi(obs, state, env)
-    obs_cost = cost(obs)
+    expected_voi = voi(obs, state, env)
+    cost = observation_cost(obs)
     
-    # Only observe if VoI exceeds cost
-    if obs_voi > obs_cost:
+    # Only observe if VoI exceeds cost by a margin
+    if expected_voi > cost * 1.5:
         return obs
     
     return None
 
 
-def should_replan(state: MissionState, last_perception: Perception, 
-                  current_perception: Perception) -> bool:
-    """Determine if replanning is needed based on perception changes.
-    
-    Triggers replanning when:
-    - New targets become visible
-    - Terrain hazards are discovered
-    - Significant localization drift
+def should_replan(
+    state: MissionState,
+    old_perception: Perception,
+    new_perception: Perception
+) -> bool:
+    """Check if significant perception change warrants replanning.
     
     Args:
         state: Current mission state
-        last_perception: Previous perception
-        current_perception: Latest perception
+        old_perception: Previous perception
+        new_perception: Current perception
     
     Returns:
-        True if replanning is warranted
+        True if replanning is recommended
     """
-    # Check for new visible targets
-    last_target_ids = {t.id for t in last_perception.visible_targets}
-    current_target_ids = {t.id for t in current_perception.visible_targets}
+    # Check if new targets appeared
+    old_ids = {t.id for t in old_perception.visible_targets}
+    new_ids = {t.id for t in new_perception.visible_targets}
     
-    if current_target_ids - last_target_ids:
-        # New targets discovered
+    if new_ids != old_ids:
         return True
     
-    # Check for significant terrain changes (simplified)
-    # In a full implementation, would compare slope/roughness maps
-    
-    # Check for dust opacity changes (affects power budget)
-    dust_change = abs(current_perception.dust_tau - last_perception.dust_tau)
-    if dust_change > 0.2:
-        return True
-    
-    # Check localization uncertainty
-    if state.localization_sigma > 5.0:
-        # High uncertainty, should replan with updated position estimate
-        return True
-    
+    # Check if terrain assessment changed significantly
+    # (would need to compare slope/roughness distributions)
+    # For now, always replan after observations
     return False
+
+
+def cost_of(action: Action) -> float:
+    """Estimate energy cost of an action (for VoI comparison).
+    
+    Args:
+        action: The action to estimate
+    
+    Returns:
+        Estimated energy cost in battery %
+    """
+    if action.kind == ActionKind.DRIVE:
+        # Rough estimate based on typical drive distance
+        return 1.0  # ~1% per meter average
+    elif action.kind == ActionKind.SAMPLE:
+        return 0.4  # Fixed sample cost
+    elif action.kind == ActionKind.SCAN:
+        return 0.1
+    elif action.kind == ActionKind.OBSERVE:
+        return 0.05
+    return 0.0
