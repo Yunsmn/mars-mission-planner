@@ -5,6 +5,8 @@ a set of moves in the full MuJoCo world, fit the slip / energy / localization-dr
 distributions, and hand those ranges to the surrogate. `surrogate_fidelity` then reports how
 well the cheap model predicts full-physics outcomes — the validation number for the writeup.
 
+SCALE: Real world is ±5m, battery in %, ~0.6 Wh/m base cost.
+
 See docs/DESIGN.md §5.2 and §5.6.
 
 Authored by IBM Bob for the MARVIN mission planner.
@@ -20,6 +22,9 @@ from planner.surrogate import SurrogateEnv
 
 logger = logging.getLogger(__name__)
 
+# Real-world scale
+TERRAIN_RADIUS = 5.0
+
 
 @dataclass
 class CalibrationResult:
@@ -31,17 +36,17 @@ class CalibrationResult:
     fidelity_metrics: dict
 
 
-def calibrate_surrogate(world, moves: list, n_samples: int = 50) -> SurrogateEnv:
+def calibrate_surrogate(world, moves: list, n_samples: int = 10) -> SurrogateEnv:
     """Fit traction / draw / drift ranges from full-physics rollouts of `moves`.
     
     Process:
     1. Execute a set of representative moves in MuJoCo
-    2. Measure actual traction (slip), energy draw, and localization drift
+    2. Measure actual traction (slip), energy draw (battery %), and localization drift
     3. Fit distributions to these measurements
     4. Return SurrogateEnv with calibrated uncertainty ranges
     
     Args:
-        world: MuJoCo simulation instance
+        world: MuJoCo simulation instance (MarsSim)
         moves: List of representative move actions to calibrate from
         n_samples: Number of samples per move type
     
@@ -55,18 +60,13 @@ def calibrate_surrogate(world, moves: list, n_samples: int = 50) -> SurrogateEnv
     drift_samples = []
     draw_mult_samples = []
     
-    # Get baseline perception for terrain data
-    from world import sensors
-    rng = np.random.default_rng(42)
-    perception = sensors.observe(world, rng)
-    
     # For each move type, execute multiple times and measure
     for move_idx, move in enumerate(moves):
         logger.debug(f"Calibrating move {move_idx+1}/{len(moves)}")
         
         for sample_idx in range(n_samples):
-            # Reset to a known state (simplified - would need proper state management)
-            initial_pose = sensors.read_pose(world, rng)
+            # Get initial state
+            initial_x, initial_y, _ = world.pose()
             initial_battery = world.battery_pct
             
             # Execute the move
@@ -75,30 +75,31 @@ def calibrate_surrogate(world, moves: list, n_samples: int = 50) -> SurrogateEnv
                 result = world.drive_to(target_xy[0], target_xy[1])
                 
                 # Measure actual vs expected
-                final_pose = sensors.read_pose(world, rng)
+                final_x, final_y, _ = world.pose()
                 
                 # Traction: ratio of actual distance to intended distance
-                intended_dist = np.linalg.norm(
-                    np.array(target_xy) - np.array(initial_pose.xy)
+                intended_dist = np.hypot(
+                    target_xy[0] - initial_x,
+                    target_xy[1] - initial_y
                 )
                 actual_dist = result.get('distance_m', intended_dist)
                 
-                if intended_dist > 0:
+                if intended_dist > 0.1:  # Only measure for non-trivial moves
                     traction_ratio = actual_dist / intended_dist
                     traction_samples.append(traction_ratio)
                 
                 # Localization drift: error in final position
                 expected_xy = np.array(target_xy)
-                actual_xy = np.array(final_pose.xy)
+                actual_xy = np.array([final_x, final_y])
                 drift = np.linalg.norm(actual_xy - expected_xy)
                 drift_samples.append(drift)
                 
-                # Energy draw multiplier: actual vs nominal
-                energy_used = initial_battery - world.battery_pct
-                nominal_energy = intended_dist * 5.0  # base rate from surrogate
+                # Energy draw multiplier: actual vs nominal (battery %)
+                battery_used = initial_battery - world.battery_pct
+                nominal_energy = intended_dist * 0.6  # BASE_WH_PER_M, battery % ≈ Wh
                 
-                if nominal_energy > 0:
-                    draw_mult = energy_used / nominal_energy
+                if nominal_energy > 0.1:
+                    draw_mult = battery_used / nominal_energy
                     draw_mult_samples.append(draw_mult)
     
     # Fit distributions (use percentiles for robust range estimation)
@@ -108,18 +109,18 @@ def calibrate_surrogate(world, moves: list, n_samples: int = 50) -> SurrogateEnv
             float(np.percentile(traction_samples, 90))
         )
     else:
-        traction_range = (0.7, 1.3)  # default
+        traction_range = (0.8, 1.2)  # default
     
     if drift_samples:
         # Drift is absolute, so use mean and std
         drift_mean = float(np.mean(drift_samples))
         drift_std = float(np.std(drift_samples))
         loc_drift_range = (
-            max(0.1, drift_mean - drift_std),
+            max(0.05, drift_mean - drift_std),
             drift_mean + drift_std
         )
     else:
-        loc_drift_range = (0.1, 0.5)  # default
+        loc_drift_range = (0.05, 0.15)  # default
     
     if draw_mult_samples:
         draw_mult_range = (
@@ -127,22 +128,25 @@ def calibrate_surrogate(world, moves: list, n_samples: int = 50) -> SurrogateEnv
             float(np.percentile(draw_mult_samples, 90))
         )
     else:
-        draw_mult_range = (0.9, 1.2)  # default
+        draw_mult_range = (0.9, 1.1)  # default
     
     logger.info(f"Calibration complete:")
     logger.info(f"  Traction range: {traction_range}")
     logger.info(f"  Loc drift range: {loc_drift_range}")
     logger.info(f"  Draw mult range: {draw_mult_range}")
     
-    # Create calibrated environment
-    return SurrogateEnv(
-        slope_deg=perception.slope_deg,
-        roughness=perception.roughness,
-        dust_tau=perception.dust_tau,
-        traction_range=traction_range,
-        loc_drift_range=loc_drift_range,
-        draw_mult_range=draw_mult_range
-    )
+    # Create calibrated environment using real world terrain
+    from planner.surrogate import create_surrogate_env
+    
+    # Use a default config for calibration
+    cfg = {
+        'traction_range': traction_range,
+        'loc_drift_range': loc_drift_range,
+        'draw_mult_range': draw_mult_range,
+        'surrogate_grid_size': 16
+    }
+    
+    return create_surrogate_env(world, cfg)
 
 
 def surrogate_fidelity(
@@ -160,7 +164,7 @@ def surrogate_fidelity(
     
     Args:
         env: Calibrated SurrogateEnv
-        world: MuJoCo simulation
+        world: MuJoCo simulation (MarsSim)
         seq: Action sequence to test
         n_rollouts: Number of surrogate rollouts for comparison
     
@@ -168,47 +172,50 @@ def surrogate_fidelity(
         Dict with fidelity metrics (lower error = better)
     """
     from planner.surrogate import rollout_batch
-    from world import sensors
-    from common.types import MissionState, Pose
+    from common.types import MissionState, Pose, Target
     
     logger.info("Measuring surrogate fidelity...")
     
     # Get initial state from world
     rng = np.random.default_rng(42)
-    initial_pose = sensors.read_pose(world, rng)
+    initial_x, initial_y, initial_yaw = world.pose()
     initial_battery = world.battery_pct
     
     # Build mission state
-    perception = sensors.observe(world, rng)
     state = MissionState(
-        pose=initial_pose,
+        pose=Pose(xy=(initial_x, initial_y), heading_rad=initial_yaw),
         battery_pct=initial_battery,
         sol_time=0.0,
-        localization_sigma=1.0,
-        collected=tuple(world.collected_samples),
-        remaining=tuple(perception.visible_targets)
+        localization_sigma=0.1,
+        collected=tuple(t.id for t in world.targets if t.collected),
+        remaining=tuple(
+            Target(id=t.id, xy=t.xy, science_value=0.5, mineral_class="unknown")
+            for t in world.targets if not t.collected
+        )
     )
     
     # Execute in MuJoCo (ground truth)
     mujoco_success = True
-    mujoco_energy = 0.0
-    mujoco_final_xy = initial_pose.xy
+    mujoco_battery_used = 0.0
+    mujoco_final_xy = (initial_x, initial_y)
     
     for action in seq:
         if action.kind.name == 'DRIVE':
             xy = action.params.get('xy')
             if xy:
+                battery_before = world.battery_pct
                 result = world.drive_to(xy[0], xy[1])
                 mujoco_success = mujoco_success and result.get('success', False)
-                mujoco_energy += result.get('energy_wh', 0)
-                mujoco_final_xy = xy
+                mujoco_battery_used += battery_before - world.battery_pct
+                mujoco_final_xy = world.pose()[:2]
         
         elif action.kind.name == 'SAMPLE':
             target_id = action.params.get('target')
             if target_id:
+                battery_before = world.battery_pct
                 result = world.sample(target_id)
                 mujoco_success = mujoco_success and result.get('success', False)
-                mujoco_energy += result.get('energy_wh', 20.0)
+                mujoco_battery_used += battery_before - world.battery_pct
     
     # Execute in surrogate (multiple rollouts)
     action_seq = tuple(seq)
@@ -221,17 +228,18 @@ def surrogate_fidelity(
     
     # Calculate errors
     success_error = abs(surrogate_success_rate - (1.0 if mujoco_success else 0.0))
-    energy_error_pct = abs(surrogate_energy_mean - mujoco_energy) / max(mujoco_energy, 1.0) * 100
     
-    # Position error (simplified - would need to track final positions in surrogate)
-    # For now, use energy as a proxy for fidelity
+    if mujoco_battery_used > 0:
+        energy_error_pct = abs(surrogate_energy_mean - mujoco_battery_used) / mujoco_battery_used * 100
+    else:
+        energy_error_pct = 0.0
     
     metrics = {
         'success_error': success_error,
         'energy_error_pct': energy_error_pct,
         'energy_std': surrogate_energy_std,
         'mujoco_success': mujoco_success,
-        'mujoco_energy': mujoco_energy,
+        'mujoco_battery_used': mujoco_battery_used,
         'surrogate_success_rate': surrogate_success_rate,
         'surrogate_energy_mean': surrogate_energy_mean,
         'n_rollouts': n_rollouts
@@ -240,7 +248,7 @@ def surrogate_fidelity(
     logger.info(f"Fidelity metrics:")
     logger.info(f"  Success error: {success_error:.3f}")
     logger.info(f"  Energy error: {energy_error_pct:.1f}%")
-    logger.info(f"  Energy std: {surrogate_energy_std:.1f} Wh")
+    logger.info(f"  Energy std: {surrogate_energy_std:.2f}%")
     
     return metrics
 
@@ -249,22 +257,22 @@ def run_calibration_suite(world, cfg: dict) -> CalibrationResult:
     """Run a full calibration suite with representative moves.
     
     Args:
-        world: MuJoCo simulation
+        world: MuJoCo simulation (MarsSim)
         cfg: Configuration dict
     
     Returns:
         CalibrationResult with fitted ranges and fidelity metrics
     """
-    # Define representative moves for calibration
+    # Define representative moves for calibration (within ±5m bounds)
     # These should cover different terrain types and distances
     moves = [
-        {'xy': (10, 0)},   # Short flat drive
-        {'xy': (20, 0)},   # Medium flat drive
-        {'xy': (10, 10)},  # Diagonal drive
-        {'xy': (30, 0)},   # Long drive
+        {'xy': (1.0, 0.0)},   # Short flat drive
+        {'xy': (2.0, 0.0)},   # Medium flat drive
+        {'xy': (1.5, 1.5)},   # Diagonal drive
+        {'xy': (3.0, 0.0)},   # Longer drive
     ]
     
-    n_samples = cfg.get('calibration_samples', 10)
+    n_samples = cfg.get('calibration_samples', 5)
     
     # Calibrate
     env = calibrate_surrogate(world, moves, n_samples)
@@ -272,7 +280,7 @@ def run_calibration_suite(world, cfg: dict) -> CalibrationResult:
     # Measure fidelity on a test sequence
     from common.types import Action, ActionKind
     test_seq = [
-        Action(kind=ActionKind.DRIVE, params={'xy': (15, 5)}),
+        Action(kind=ActionKind.DRIVE, params={'xy': (1.6, 0.8)}),
     ]
     
     fidelity = surrogate_fidelity(env, world, test_seq)

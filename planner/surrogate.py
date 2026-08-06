@@ -9,6 +9,8 @@ path integrated over the DEM slope map, energy = f(dist, slope, payload),
 slip/hazard = f(slope, roughness) with probability of getting stuck rising past a threshold.
 Uncertainty per rollout: traction, localization drift, battery-draw multiplier.
 
+SCALE: Real world is ±5m, targets ~1-2m away, battery in %, ~0.6 Wh/m base cost.
+
 Authored by IBM Bob for the MARVIN mission planner.
 """
 from __future__ import annotations
@@ -19,11 +21,20 @@ import numpy as np
 
 from common.types import ActionSeq, MissionState, RolloutBatch
 
+# Real-world scale constants (match world/sim.py and rover/energy.py)
+TERRAIN_RADIUS = 5.0  # world spans [-5, 5] m
+BASE_WH_PER_M = 0.6   # flat-ground energy cost
+SLOPE_WH_PER_M_PER_DEG = 0.05
+SAMPLE_ENERGY_WH = 0.4  # battery % cost per sample
+SCAN_ENERGY_WH = 0.1
+OBSERVE_ENERGY_WH = 0.05
+
 
 @dataclass(frozen=True)
 class SurrogateEnv:
-    slope_deg: np.ndarray
-    roughness: np.ndarray
+    """Lightweight terrain model for fast rollouts."""
+    terrain: np.ndarray      # Coarse elevation grid (16-24 cells)
+    meters_per_cell: float   # Grid resolution
     dust_tau: float
     traction_range: tuple[float, float]
     loc_drift_range: tuple[float, float]
@@ -44,7 +55,7 @@ def rollout_batch(
     Args:
         seq: Action sequence to simulate
         state: Current mission state (pose, battery, etc.)
-        env: Environment parameters (slope map, uncertainty ranges)
+        env: Environment parameters (terrain, uncertainty ranges)
         n: Number of rollouts to perform
         rng: Random number generator for uncertainty injection
     
@@ -54,7 +65,7 @@ def rollout_batch(
     # Initialize arrays for all rollouts (vectorized)
     positions = np.tile(state.pose.xy, (n, 1))  # (n, 2)
     headings = np.full(n, state.pose.heading_rad)  # (n,)
-    battery_wh = np.full(n, state.battery_pct * 10.0)  # rough: 1% = 10 Wh
+    battery_pct = np.full(n, state.battery_pct)  # (n,) - battery as percentage
     loc_uncertainty = np.full(n, state.localization_sigma)  # (n,)
     
     # Sample uncertainty parameters for each rollout
@@ -76,7 +87,7 @@ def rollout_batch(
     
     # Track outcomes
     success = np.ones(n, dtype=bool)
-    energy_used = np.zeros(n)
+    energy_used_pct = np.zeros(n)  # Track as battery percentage
     peak_hazard = np.zeros(n)
     
     # Simulate each action in the sequence
@@ -87,34 +98,23 @@ def rollout_batch(
                 success[:] = False
                 continue
             
-            # Vectorized drive simulation
+            # Clip target to terrain bounds
             target = np.array(target_xy)
+            target = np.clip(target, -TERRAIN_RADIUS, TERRAIN_RADIUS)
             
             # Calculate distance for all rollouts
             delta = target - positions
             distances = np.linalg.norm(delta, axis=1)  # (n,)
             
-            # Sample terrain along path (simplified: use midpoint)
-            midpoints = (positions + target) / 2
-            
-            # Get slope and roughness at midpoints (with bounds checking)
-            h, w = env.slope_deg.shape
-            mid_i = np.clip(midpoints[:, 1].astype(int), 0, h - 1)
-            mid_j = np.clip(midpoints[:, 0].astype(int), 0, w - 1)
-            
-            slopes = env.slope_deg[mid_i, mid_j]  # (n,)
-            rough = env.roughness[mid_i, mid_j]  # (n,)
+            # Sample terrain along path using bilinear interpolation
+            slopes = sample_terrain_along_path(positions, target, env)  # (n,)
             
             # Hazard model: increases sharply with slope
             # Base hazard from slope (normalized to [0, 1])
-            slope_hazard = np.clip(slopes / 30.0, 0, 1)  # 30° = max safe slope
-            
-            # Roughness adds to hazard
-            roughness_hazard = np.clip(rough / 0.5, 0, 0.3)  # roughness contributes up to 0.3
+            slope_hazard = np.clip(slopes / 25.0, 0, 1)  # 25° = high risk
             
             # Combined hazard with traction uncertainty
-            hazard = slope_hazard + roughness_hazard
-            hazard = hazard * (2.0 - traction_mult)  # poor traction increases hazard
+            hazard = slope_hazard * (2.0 - traction_mult)  # poor traction increases hazard
             hazard = np.clip(hazard, 0, 1)
             
             # Update peak hazard
@@ -125,37 +125,36 @@ def rollout_batch(
             failures = rng.random(n) < failure_prob
             success[failures] = False
             
-            # Energy model: base + slope penalty + distance
-            # Base energy per meter
-            base_energy_per_m = 5.0  # Wh/m
+            # Energy model: matches rover/energy.py
+            # Base energy per meter (0.6 Wh/m)
+            per_m = BASE_WH_PER_M + SLOPE_WH_PER_M_PER_DEG * np.maximum(0, slopes)
             
-            # Slope penalty (uphill costs more)
-            slope_factor = 1.0 + np.clip(slopes / 15.0, 0, 2)  # up to 3x for steep slopes
+            # Total energy with uncertainty (in Wh, then convert to %)
+            energy_wh = distances * per_m * draw_mult
+            energy_pct = energy_wh  # Nominal capacity ~100 Wh, so Wh ≈ %
             
-            # Roughness penalty
-            rough_factor = 1.0 + rough * 0.5
-            
-            # Total energy with uncertainty
-            energy = distances * base_energy_per_m * slope_factor * rough_factor * draw_mult
-            energy_used += energy
-            battery_wh -= energy
+            energy_used_pct += energy_pct
+            battery_pct -= energy_pct
             
             # Update positions (with localization drift)
             drift = rng.normal(0, loc_drift_rate[:, np.newaxis], size=(n, 2))
             positions = target + drift
             
+            # Clip positions to terrain bounds
+            positions = np.clip(positions, -TERRAIN_RADIUS, TERRAIN_RADIUS)
+            
             # Update localization uncertainty
             loc_uncertainty += distances * 0.01  # grows with distance traveled
             
             # Check battery depletion
-            depleted = battery_wh <= 0
+            depleted = battery_pct <= 0
             success[depleted] = False
             
         elif action.kind.name == 'SAMPLE':
-            # Sampling action: fixed energy cost, no movement
-            sample_energy = 20.0  # Wh per sample
-            energy_used += sample_energy * draw_mult
-            battery_wh -= sample_energy * draw_mult
+            # Sampling action: fixed energy cost (battery %)
+            sample_energy_pct = SAMPLE_ENERGY_WH * draw_mult
+            energy_used_pct += sample_energy_pct
+            battery_pct -= sample_energy_pct
             
             # Small failure probability (instrument issues)
             sample_failures = rng.random(n) < 0.05
@@ -163,15 +162,15 @@ def rollout_batch(
             
         elif action.kind.name == 'SCAN':
             # Scanning action: small energy cost
-            scan_energy = 5.0  # Wh per scan
-            energy_used += scan_energy * draw_mult
-            battery_wh -= scan_energy * draw_mult
+            scan_energy_pct = SCAN_ENERGY_WH * draw_mult
+            energy_used_pct += scan_energy_pct
+            battery_pct -= scan_energy_pct
             
         elif action.kind.name == 'OBSERVE':
             # Observation action: minimal energy
-            obs_energy = 2.0  # Wh
-            energy_used += obs_energy * draw_mult
-            battery_wh -= obs_energy * draw_mult
+            obs_energy_pct = OBSERVE_ENERGY_WH * draw_mult
+            energy_used_pct += obs_energy_pct
+            battery_pct -= obs_energy_pct
             
         elif action.kind.name == 'HOLD':
             # Hold: no action, no energy
@@ -179,31 +178,134 @@ def rollout_batch(
     
     return RolloutBatch(
         success=success,
-        energy=energy_used,
+        energy=energy_used_pct,  # Return as battery % used
         hazard=peak_hazard
     )
 
 
-def create_surrogate_env(perception, cfg: dict) -> SurrogateEnv:
-    """Create a SurrogateEnv from current perception and config.
+def sample_terrain_along_path(
+    start_positions: np.ndarray,
+    target: np.ndarray,
+    env: SurrogateEnv
+) -> np.ndarray:
+    """Sample terrain slope along paths using bilinear interpolation.
     
     Args:
-        perception: Current perception with slope, roughness, dust_tau
+        start_positions: (n, 2) array of starting positions
+        target: (2,) target position
+        env: SurrogateEnv with terrain grid
+    
+    Returns:
+        (n,) array of slope values in degrees
+    """
+    # Sample at midpoint of path
+    midpoints = (start_positions + target) / 2
+    
+    # Convert world coordinates to grid indices (bilinear interpolation)
+    # Grid spans [-TERRAIN_RADIUS, TERRAIN_RADIUS]
+    grid_size = env.terrain.shape[0]
+    
+    # Normalize to [0, grid_size-1]
+    grid_x = (midpoints[:, 0] + TERRAIN_RADIUS) / (2 * TERRAIN_RADIUS) * (grid_size - 1)
+    grid_y = (midpoints[:, 1] + TERRAIN_RADIUS) / (2 * TERRAIN_RADIUS) * (grid_size - 1)
+    
+    # Clip to valid range
+    grid_x = np.clip(grid_x, 0, grid_size - 1)
+    grid_y = np.clip(grid_y, 0, grid_size - 1)
+    
+    # Bilinear interpolation
+    x0 = np.floor(grid_x).astype(int)
+    x1 = np.minimum(x0 + 1, grid_size - 1)
+    y0 = np.floor(grid_y).astype(int)
+    y1 = np.minimum(y0 + 1, grid_size - 1)
+    
+    # Fractional parts
+    fx = grid_x - x0
+    fy = grid_y - y0
+    
+    # Get elevation at corners
+    z00 = env.terrain[y0, x0]
+    z01 = env.terrain[y0, x1]
+    z10 = env.terrain[y1, x0]
+    z11 = env.terrain[y1, x1]
+    
+    # Bilinear interpolation
+    z0 = z00 * (1 - fx) + z01 * fx
+    z1 = z10 * (1 - fx) + z11 * fx
+    elevation = z0 * (1 - fy) + z1 * fy
+    
+    # Compute slope from local gradient (simplified)
+    # Use finite differences on the coarse grid
+    dx = (z01 - z00) / env.meters_per_cell
+    dy = (z10 - z00) / env.meters_per_cell
+    
+    slope_rad = np.arctan(np.sqrt(dx**2 + dy**2))
+    slope_deg = np.degrees(slope_rad)
+    
+    return slope_deg
+
+
+def create_surrogate_env(world, cfg: dict) -> SurrogateEnv:
+    """Create a SurrogateEnv from the real world terrain.
+    
+    Args:
+        world: MarsSim instance with terrain
         cfg: Configuration dict with uncertainty ranges
     
     Returns:
         SurrogateEnv ready for rollout_batch
     """
-    # Default uncertainty ranges (can be calibrated from MuJoCo)
-    traction_range = cfg.get('traction_range', (0.7, 1.3))
-    loc_drift_range = cfg.get('loc_drift_range', (0.1, 0.5))
-    draw_mult_range = cfg.get('draw_mult_range', (0.9, 1.2))
+    # Create coarse terrain grid (16x16 or 24x24) from full DEM
+    # This is the "lightweight point cloud" derived from the real DEM
+    full_terrain = world.terrain
+    target_size = cfg.get('surrogate_grid_size', 16)
+    
+    # Downsample terrain while preserving local highs/lows
+    coarse_terrain = downsample_terrain(full_terrain, target_size)
+    
+    meters_per_cell = 2 * TERRAIN_RADIUS / (target_size - 1)
+    
+    # Default uncertainty ranges (calibrated from MuJoCo)
+    traction_range = cfg.get('traction_range', (0.8, 1.2))
+    loc_drift_range = cfg.get('loc_drift_range', (0.05, 0.15))
+    draw_mult_range = cfg.get('draw_mult_range', (0.9, 1.1))
     
     return SurrogateEnv(
-        slope_deg=perception.slope_deg,
-        roughness=perception.roughness,
-        dust_tau=perception.dust_tau,
+        terrain=coarse_terrain,
+        meters_per_cell=meters_per_cell,
+        dust_tau=world.dust_tau,
         traction_range=traction_range,
         loc_drift_range=loc_drift_range,
         draw_mult_range=draw_mult_range
     )
+
+
+def downsample_terrain(terrain: np.ndarray, target_size: int) -> np.ndarray:
+    """Downsample terrain to target_size while preserving features.
+    
+    Uses max pooling to preserve local highs (important for hazard detection).
+    
+    Args:
+        terrain: Full resolution terrain (n x n)
+        target_size: Target grid size (e.g., 16 or 24)
+    
+    Returns:
+        Downsampled terrain (target_size x target_size)
+    """
+    from scipy.ndimage import maximum_filter
+    
+    current_size = terrain.shape[0]
+    if current_size == target_size:
+        return terrain
+    
+    # Calculate pooling window size
+    pool_size = current_size // target_size
+    
+    # Apply max pooling to preserve peaks
+    pooled = maximum_filter(terrain, size=pool_size)
+    
+    # Subsample
+    indices = np.linspace(0, current_size - 1, target_size, dtype=int)
+    coarse = pooled[np.ix_(indices, indices)]
+    
+    return coarse

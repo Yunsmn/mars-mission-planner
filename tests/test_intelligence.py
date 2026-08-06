@@ -58,9 +58,12 @@ def sample_perception():
 @pytest.fixture
 def sample_env(sample_perception):
     """Create a sample surrogate environment."""
+    # Create a simple terrain grid for testing
+    terrain = np.random.uniform(0, 1, size=(16, 16))
+    
     return SurrogateEnv(
-        slope_deg=sample_perception.slope_deg,
-        roughness=sample_perception.roughness,
+        terrain=terrain,
+        meters_per_cell=0.625,  # 10m / 16 cells
         dust_tau=0.5,
         traction_range=(0.8, 1.2),
         loc_drift_range=(0.2, 0.4),
@@ -225,20 +228,27 @@ class TestSurrogate:
         # Most should succeed (small failure rate)
         assert np.mean(batch.success) > 0.9
     
-    def test_create_surrogate_env(self, sample_perception):
+    def test_create_surrogate_env(self):
         """Test surrogate environment creation."""
+        from world.sim import MarsSim
+        
+        # Create a simple world for testing
+        world = MarsSim(seed=42)
+        
         cfg = {
             'traction_range': (0.7, 1.3),
             'loc_drift_range': (0.1, 0.5),
-            'draw_mult_range': (0.85, 1.15)
+            'draw_mult_range': (0.85, 1.15),
+            'surrogate_grid_size': 16
         }
         
-        env = surrogate.create_surrogate_env(sample_perception, cfg)
+        env = surrogate.create_surrogate_env(world, cfg)
         
         assert env.traction_range == (0.7, 1.3)
         assert env.loc_drift_range == (0.1, 0.5)
         assert env.draw_mult_range == (0.85, 1.15)
-        assert env.dust_tau == sample_perception.dust_tau
+        assert env.dust_tau == world.dust_tau
+        assert env.terrain.shape[0] == 16
 
 
 class TestVoI:

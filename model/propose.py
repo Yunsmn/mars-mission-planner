@@ -3,6 +3,8 @@
 It never executes anything. Malformed or invalid proposals are dropped, never crash the loop.
 The surrogate + gate are what make trusting a local model acceptable.
 
+SCALE: Real world is ±5m, targets ~1-2m away. Validate all coordinates to terrain bounds.
+
 Authored by IBM Bob for the MARVIN mission planner.
 """
 from __future__ import annotations
@@ -16,6 +18,9 @@ import requests
 from common.types import Action, ActionKind, ActionSeq, MissionState, Perception
 
 logger = logging.getLogger(__name__)
+
+# Real-world terrain bounds (match world/sim.py)
+TERRAIN_RADIUS = 5.0  # world spans [-5, 5] m
 
 
 class Proposer:
@@ -77,35 +82,38 @@ CURRENT STATE:
 VISIBLE TARGETS:
 {targets_str}
 
-PERCEPTION:
-- Dust opacity (tau): {perception.dust_tau:.2f}
-- Terrain: slope and roughness maps available
+TERRAIN CONSTRAINTS:
+- World bounds: x,y in [-5.0, 5.0] meters
+- Targets are typically 1-2 meters away
+- Battery reserve: must keep >15%
 
 AVAILABLE ACTIONS:
-1. DRIVE to (x, y) - navigate to coordinates
-2. SAMPLE target_id - collect sample at current location
+1. DRIVE to (x, y) - navigate to coordinates (must be within ±5m)
+2. SAMPLE target_id - collect sample at current location (use exact target id)
 3. SCAN - refresh perception
 4. OBSERVE - take additional observation to reduce uncertainty
 5. HOLD - safe default, do nothing
 
 CONSTRAINTS:
+- All DRIVE coordinates must be within [-5.0, 5.0] range
+- SAMPLE must use exact target ids from visible targets
 - Battery reserve: must keep >15% battery
 - Risk ceiling: avoid high-slope/rough terrain
 - Prioritize high science value targets
 
-Generate {k} diverse candidate sequences. Each sequence should be 1-5 actions.
-Consider: direct routes, cautious routes with scans, high-value vs safe targets.
+Generate {k} diverse candidate sequences. Each sequence should be 1-3 actions.
+Consider: direct routes to nearby targets, cautious routes with scans, high-value targets.
 
 OUTPUT FORMAT (JSON array of sequences):
 [
   [
-    {{"action": "DRIVE", "params": {{"xy": [x, y]}}}},
-    {{"action": "SAMPLE", "params": {{"target": "target_id"}}}}
+    {{"action": "DRIVE", "params": {{"xy": [1.6, 0.8]}}}},
+    {{"action": "SAMPLE", "params": {{"target": "sample_a"}}}}
   ],
   [
     {{"action": "SCAN", "params": {{}}}},
-    {{"action": "DRIVE", "params": {{"xy": [x, y]}}}},
-    {{"action": "SAMPLE", "params": {{"target": "target_id"}}}}
+    {{"action": "DRIVE", "params": {{"xy": [-1.2, 1.5]}}}},
+    {{"action": "SAMPLE", "params": {{"target": "sample_b"}}}}
   ]
 ]
 
@@ -146,6 +154,7 @@ Respond with ONLY the JSON array, no other text.
         """Parse and validate the model's response into ActionSeq tuples.
         
         Drops malformed or invalid proposals without crashing.
+        Validates coordinates to terrain bounds and target ids.
         """
         candidates = []
         
@@ -185,6 +194,7 @@ Respond with ONLY the JSON array, no other text.
             
             # If no valid candidates, return safe hold
             if not candidates:
+                logger.warning("No valid candidates after parsing, using HOLD")
                 candidates = [self._safe_hold()]
             
             return candidates
@@ -202,7 +212,12 @@ Respond with ONLY the JSON array, no other text.
         state: MissionState,
         perception: Perception
     ) -> Action | None:
-        """Parse a single action from JSON data."""
+        """Parse a single action from JSON data.
+        
+        Validates:
+        - DRIVE coordinates are within ±5m bounds
+        - SAMPLE targets exist in visible targets
+        """
         try:
             action_name = action_data.get("action", "").upper()
             params = action_data.get("params", {})
@@ -213,19 +228,34 @@ Respond with ONLY the JSON array, no other text.
                 # Validate xy coordinates
                 xy = params.get("xy")
                 if not isinstance(xy, (list, tuple)) or len(xy) != 2:
+                    logger.warning(f"Invalid DRIVE coordinates: {xy}")
                     return None
-                params = {"xy": tuple(xy)}
+                
+                # Clip to terrain bounds [-5, 5]
+                x = float(xy[0])
+                y = float(xy[1])
+                
+                if abs(x) > TERRAIN_RADIUS or abs(y) > TERRAIN_RADIUS:
+                    logger.warning(f"DRIVE coordinates out of bounds: ({x:.1f}, {y:.1f}), clipping")
+                    x = max(-TERRAIN_RADIUS, min(TERRAIN_RADIUS, x))
+                    y = max(-TERRAIN_RADIUS, min(TERRAIN_RADIUS, y))
+                
+                params = {"xy": (x, y)}
                 
             elif action_name == "SAMPLE":
                 kind = ActionKind.SAMPLE
                 # Validate target exists
                 target_id = params.get("target")
                 if not target_id:
+                    logger.warning("SAMPLE action missing target id")
                     return None
-                # Check if target is visible or already collected
+                
+                # Check if target is visible
                 valid_targets = [t.id for t in perception.visible_targets]
-                if target_id not in valid_targets and target_id not in state.collected:
+                if target_id not in valid_targets:
+                    logger.warning(f"SAMPLE target {target_id} not in visible targets: {valid_targets}")
                     return None
+                
                 params = {"target": target_id}
                 
             elif action_name == "SCAN":

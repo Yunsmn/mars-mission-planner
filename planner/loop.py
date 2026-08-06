@@ -212,7 +212,7 @@ def run_mission(
             battery_pct=current_battery,
             sol_time=step * 0.1,  # Rough time estimate
             localization_sigma=1.0,  # Would come from sensors in full impl
-            collected=tuple(world.collected_samples),
+            collected=tuple(t.id for t in world.targets if t.collected),
             remaining=tuple(current_perception.visible_targets)
         )
         
@@ -227,8 +227,8 @@ def run_mission(
             if voi.should_replan(state, last_perception, current_perception):
                 logger.info("Replanning triggered by perception change")
         
-        # Create surrogate environment
-        env = surrogate.create_surrogate_env(current_perception, cfg)
+        # Create surrogate environment from real world terrain
+        env = surrogate.create_surrogate_env(world, cfg)
         
         # DECIDE - propose-and-verify loop
         decision = decide_next_action(state, current_perception, env, model, cfg)
@@ -244,8 +244,11 @@ def run_mission(
         if action.kind == ActionKind.DRIVE:
             xy = action.params['xy']
             logger.info(f"Executing DRIVE to ({xy[0]:.1f}, {xy[1]:.1f})")
+            battery_before = cap.battery()
             result = cap.drive_to(xy[0], xy[1])
-            total_energy += result.get('energy_wh', 0)
+            battery_after = result.get('battery_pct', cap.battery())
+            energy_used = battery_before - battery_after
+            total_energy += energy_used
             
             if not result.get('success', False):
                 logger.warning("Drive failed!")
@@ -253,28 +256,36 @@ def run_mission(
         elif action.kind == ActionKind.SAMPLE:
             target_id = action.params['target']
             logger.info(f"Executing SAMPLE on {target_id}")
+            battery_before = cap.battery()
             result = cap.sample(target_id)
-            total_energy += result.get('energy_wh', 20.0)
+            battery_after = result.get('battery_pct', cap.battery())
+            energy_used = battery_before - battery_after
+            total_energy += energy_used
             
             if result.get('success', False):
                 logger.info(f"Sample {target_id} collected successfully")
         
         elif action.kind == ActionKind.SCAN:
             logger.info("Executing SCAN")
+            battery_before = cap.battery()
             current_perception = cap.scan()
-            total_energy += 5.0
+            battery_after = cap.battery()
+            total_energy += battery_before - battery_after
         
         elif action.kind == ActionKind.OBSERVE:
             logger.info("Executing OBSERVE")
             # Targeted observation (simplified)
-            total_energy += 2.0
+            battery_before = cap.battery()
+            # Minimal observation action
+            battery_after = cap.battery()
+            total_energy += max(0.05, battery_before - battery_after)
         
         elif action.kind == ActionKind.HOLD:
             logger.info("Executing HOLD (safe state)")
             # No action, no energy
         
         # Check mission completion
-        if len(world.collected_samples) >= 2:  # Objective: cache 2 samples
+        if sum(1 for t in world.targets if t.collected) >= 2:
             logger.info("Mission objective achieved: 2 samples collected")
             break
         
@@ -294,20 +305,20 @@ def run_mission(
         battery_pct=final_battery,
         sol_time=step * 0.1,
         localization_sigma=1.0,
-        collected=tuple(world.collected_samples),
+        collected=tuple(t.id for t in world.targets if t.collected),
         remaining=tuple(final_perception.visible_targets)
     )
     
-    success = len(world.collected_samples) >= 2
+    success = sum(1 for t in world.targets if t.collected) >= 2
     
     logger.info(f"\nMission complete: {len(decisions)} decisions, "
-               f"{len(world.collected_samples)} samples, "
-               f"{total_energy:.1f} Wh used")
+               f"{sum(1 for t in world.targets if t.collected)} samples, "
+               f"{total_energy:.1f}% battery used")
     
     return MissionLog(
         decisions=decisions,
         final_state=final_state,
         total_energy=total_energy,
-        samples_collected=len(world.collected_samples),
+        samples_collected=sum(1 for t in world.targets if t.collected),
         success=success
     )

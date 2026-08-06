@@ -5,6 +5,8 @@ Implements CVaR-style tail aggregation and filters candidates to the safe set ba
 - p_success_min: minimum mean success probability
 - battery_reserve_pct: never plan below this battery level
 
+SCALE: Battery is in %, energy costs are in % (not Wh). Real world is ±5m.
+
 Authored by IBM Bob for the MARVIN mission planner.
 """
 from __future__ import annotations
@@ -57,7 +59,7 @@ def score_candidate(
     # Mean success probability across rollouts
     p_success = float(np.mean(batch.success))
     
-    # Tail (worst-case) energy consumption
+    # Tail (worst-case) energy consumption (in battery %)
     q = cfg.get('cvar_quantile', 0.90)
     cvar_energy = tail_worst(batch.energy, q)
     
@@ -76,9 +78,9 @@ def score_candidate(
                         science_value += target.science_value
                         break
     
-    # Energy penalty (convert Wh to a comparable scale with science value)
-    # Typical science values are 0-1, so normalize energy accordingly
-    energy_penalty_factor = cfg.get('energy_penalty_factor', 0.01)
+    # Energy penalty (battery % to comparable scale with science value 0-1)
+    # Since battery is in %, and typical moves cost 1-5%, scale appropriately
+    energy_penalty_factor = cfg.get('energy_penalty_factor', 0.1)
     energy_penalty = cvar_energy * energy_penalty_factor
     
     # Net value = science gain - energy cost
@@ -125,9 +127,8 @@ def gate(
             continue
         
         # Check battery reserve constraint
-        # Estimate battery after action (rough approximation)
-        # Assume nominal battery capacity and convert energy to percentage
-        estimated_battery_after = battery_pct - (score.cvar_energy / 1000.0)  # rough conversion
+        # Energy is already in battery %, so direct comparison
+        estimated_battery_after = battery_pct - score.cvar_energy
         
         if estimated_battery_after < c.battery_reserve_pct:
             continue
@@ -142,13 +143,12 @@ def respects_battery_reserve(score: CandidateScore, battery_pct: float, reserve_
     """Check if executing this candidate would respect the battery reserve.
     
     Args:
-        score: Candidate score with energy estimate
+        score: Candidate score with energy estimate (in battery %)
         battery_pct: Current battery percentage
         reserve_pct: Minimum battery reserve percentage
     
     Returns:
         True if battery would remain above reserve after action
     """
-    # Rough conversion: assume 1000 Wh total capacity
-    estimated_battery_after = battery_pct - (score.cvar_energy / 1000.0)
+    estimated_battery_after = battery_pct - score.cvar_energy
     return estimated_battery_after >= reserve_pct
