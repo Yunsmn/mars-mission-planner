@@ -28,4 +28,4 @@ def test_config_loads():
     c = constraints_from(cfg)
     assert 0 <= c.battery_reserve_pct <= 100
     assert 0 < c.risk_ceiling < 1
-    assert cfg["model"]["name"] == "gemma3:4b"
+    assert cfg["model"]["name"] == "granite4.1:3b"

@@ -19,7 +19,7 @@ planner:
   seed: 42                    # deterministic demo
 
 model:
-  name: gemma3:4b              # local model via Ollama
+  name: granite4.1:3b          # IBM Granite 4.1 (local via Ollama, offline, Apache-2.0)
   host: http://localhost:11434
   temperature: 0.5            # lower temperature for faster, more focused responses
 

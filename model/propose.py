@@ -1,4 +1,4 @@
-"""The proposer — a LOCAL model (Gemma 4 via Ollama) that ONLY proposes action sequences.
+"""The proposer — a LOCAL model (IBM Granite 4.1 via Ollama) that ONLY proposes action sequences.
 
 It never executes anything. Malformed or invalid proposals are dropped, never crash the loop.
 The surrogate + gate are what make trusting a local model acceptable.
@@ -24,7 +24,7 @@ TERRAIN_RADIUS = 5.0  # world spans [-5, 5] m
 
 
 class Proposer:
-    """Gemma 4 proposer via Ollama API."""
+    """IBM Granite proposer via Ollama API (local, offline)."""
     
     def __init__(self, name: str, host: str, temperature: float) -> None:
         self.name = name
@@ -75,6 +75,10 @@ class Proposer:
         
         # Format already collected
         collected_str = ", ".join(state.collected) if state.collected else "none"
+
+        # Environment context (weather/dust + local hazard) so Granite plans with the full picture
+        _slope = getattr(perception, "slope_deg", None)
+        slope_max = float(_slope.max()) if _slope is not None and getattr(_slope, "size", 0) else 0.0
         
         # Check if any target is in sampling range
         sampling_ready = []
@@ -95,6 +99,10 @@ CURRENT STATE:
 - Sol time: {state.sol_time:.2f}
 - Collected samples: {collected_str}
 - Samples needed: {2 - len(state.collected)} more to complete mission
+
+ENVIRONMENT (onboard sensors):
+- Dust opacity tau: {perception.dust_tau:.2f} (higher dust -> less solar power -> conserve battery)
+- Local terrain slope: up to {slope_max:.1f} deg (avoid steep/rough terrain to reduce risk)
 
 {sampling_alert}
 
@@ -146,11 +154,11 @@ OUTPUT FORMAT - JSON array only, no other text:
         payload = {
             "model": self.name,
             "prompt": prompt,
-            "temperature": self.temperature,
             "stream": False,
             "options": {
-                "num_predict": 512  # Cap output tokens for speed (P2 optimization)
-            }
+                "temperature": self.temperature,   # Ollama reads temperature under options
+                "num_predict": 512,                 # cap output tokens for speed
+            },
         }
         
         try:
