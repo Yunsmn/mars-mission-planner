@@ -103,6 +103,7 @@ class MarsSim:
         self.sol_time = 0.0
         self.dust_tau = 0.5
         self._settle(400)
+        self.trajectory: list[tuple[float, float]] = []   # (x, y) path, for visualization
 
     # ---- physics -----------------------------------------------------------------
     def _settle(self, n: int) -> None:
@@ -117,6 +118,8 @@ class MarsSim:
         for _ in range(n):
             mujoco.mj_step(self.model, self.data)
         self.sol_time += n * self.model.opt.timestep
+        if hasattr(self, "trajectory"):
+            self.trajectory.append(self.pose()[:2])
 
     # ---- state -------------------------------------------------------------------
     def pose(self) -> tuple[float, float, float]:
