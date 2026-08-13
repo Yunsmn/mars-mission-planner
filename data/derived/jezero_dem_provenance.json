@@ -1,0 +1,14 @@
+{
+  "source": "NASA/USGS MGS MOLA global DEM 463 m/px",
+  "url": "https://planetarymaps.usgs.gov/mosaic/Mars_MGS_MOLA_DEM_mosaic_global_463m.tif",
+  "region": "Jezero crater",
+  "center_lon_e_deg": 77.58,
+  "center_lat_n_deg": 18.44,
+  "window_km": 60.0,
+  "grid": 64,
+  "real_elevation_range_m": [
+    -2781.0,
+    -1543.0
+  ],
+  "note": "Real Jezero morphology; amplitude normalized to a rover-drivable range."
+}

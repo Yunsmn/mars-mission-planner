@@ -86,11 +86,17 @@ class MarsSim:
     def __init__(self, terrain: np.ndarray | None = None, seed: int = 42,
                  targets: list[tuple[str, float, float]] | None = None,
                  dem_path: str | None = None) -> None:
+        # Default to the real Jezero MOLA DEM if it's been fetched (data.fetch_jezero); else synthetic.
+        import os as _os
+        _default_dem = "data/derived/jezero_dem.npy"
+        if dem_path is None and terrain is None and _os.path.exists(_default_dem):
+            dem_path = _default_dem
         # Load real DEM if path provided, otherwise use synthetic or provided terrain
         if dem_path:
             try:
                 self.terrain, metadata = demlib.load_dem(dem_path)
-                self.meters_per_cell = metadata.get("meters_per_cell", 6.0)
+                # Terrain is rendered into the fixed-size sim patch, so slope uses sim scale.
+                self.meters_per_cell = 2 * TERRAIN_RADIUS / (self.terrain.shape[0] - 1)
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning(f"Failed to load DEM from {dem_path}: {e}, using synthetic")

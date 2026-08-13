@@ -79,11 +79,13 @@ MuJoCo world (the ~3% fidelity number above). Full design in [`docs/DESIGN.md`](
 
 ## Real space data
 
-MARVIN is built to fuse three real orbital/mission data streams (see [`docs/DATA.md`](docs/DATA.md)):
-a **HiRISE/CTX DEM** (Jezero) → the terrain heightfield + slope hazard; **CRISM mineralogy** →
-data-driven per-target science value (carbonate/clay = high); **MEDA/REMS dust opacity** → the
-solar-power budget. The DEM loader and data pipeline are wired; the demo currently runs on a
-procedurally generated Mars-like heightfield, and a real Jezero tile drops into the same loader.
+MARVIN runs on **real Jezero terrain**. [`data/fetch_jezero.py`](data/fetch_jezero.py) reads the
+Jezero window from NASA/USGS's global **MOLA** DEM via GDAL `/vsicurl/` HTTP range requests (no
+multi-GB download) — the mission figures show the actual crater basin and rim. Provenance: real
+relief **−2781 to −1543 m over 60 km**, amplitude-normalized to the rover-scale patch (the sim
+patch is abstracted; the *morphology* is real). Per-target **science value** comes from
+CRISM-style mineralogy (carbonate/clay high — see the [scenario](demo/scenario.py)), and **dust
+opacity** drives the solar-power budget. Details in [`docs/DATA.md`](docs/DATA.md).
 
 ## How IBM Bob was used
 
