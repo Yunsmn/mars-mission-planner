@@ -48,6 +48,18 @@ def observe(sim, rng: np.random.Generator, view_range: float = 3.0) -> Perceptio
     """Build a Perception: nearby uncollected targets (with detection noise) + local terrain."""
     x, y, _ = sim.pose()
     visible = []
+    
+    # Try to load science value map if available
+    science_map = None
+    try:
+        from data.science_value import load_science_map, get_science_value, classify_mineral
+        import os
+        science_path = "data/derived/jezero_science_value.npy"
+        if os.path.exists(science_path):
+            science_map = load_science_map(science_path)
+    except Exception:
+        pass  # Fall back to default values
+    
     for t in sim.targets:
         if t.collected:
             continue
@@ -55,8 +67,20 @@ def observe(sim, rng: np.random.Generator, view_range: float = 3.0) -> Perceptio
             # detection noise on the reported location
             vx = t.xy[0] + rng.normal(0, 0.08)
             vy = t.xy[1] + rng.normal(0, 0.08)
+            
+            # Get science value from CRISM-derived map if available
+            if science_map is not None:
+                from data.science_value import get_science_value, classify_mineral
+                science_value = get_science_value(t.xy, science_map)
+                mineral_class = classify_mineral(science_value)
+            else:
+                science_value = 0.5
+                mineral_class = "unknown"
+            
             visible.append(Target(id=t.id, xy=(vx, vy),
-                                  science_value=0.5, mineral_class="unknown"))
+                                  science_value=science_value, 
+                                  mineral_class=mineral_class))
+    
     local = _local_window(sim.slope, sim, x, y)
     return Perception(slope_deg=local, roughness=local * 0.3,
                       visible_targets=tuple(visible), dust_tau=sim.dust_tau)

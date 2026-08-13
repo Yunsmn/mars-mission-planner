@@ -82,9 +82,22 @@ class MarsSim:
     """The ground-truth world + a basic rover controller (drive / sample / sense)."""
 
     def __init__(self, terrain: np.ndarray | None = None, seed: int = 42,
-                 targets: list[tuple[str, float, float]] | None = None) -> None:
-        self.terrain = demlib.synthesize(seed=seed) if terrain is None else terrain
-        self.meters_per_cell = 2 * TERRAIN_RADIUS / (self.terrain.shape[0] - 1)
+                 targets: list[tuple[str, float, float]] | None = None,
+                 dem_path: str | None = None) -> None:
+        # Load real DEM if path provided, otherwise use synthetic or provided terrain
+        if dem_path:
+            try:
+                self.terrain, metadata = demlib.load_dem(dem_path)
+                self.meters_per_cell = metadata.get("meters_per_cell", 6.0)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to load DEM from {dem_path}: {e}, using synthetic")
+                self.terrain = demlib.synthesize(seed=seed)
+                self.meters_per_cell = 2 * TERRAIN_RADIUS / (self.terrain.shape[0] - 1)
+        else:
+            self.terrain = demlib.synthesize(seed=seed) if terrain is None else terrain
+            self.meters_per_cell = 2 * TERRAIN_RADIUS / (self.terrain.shape[0] - 1)
+        
         self.slope = demlib.slope_map(self.terrain, self.meters_per_cell)
         self.hf = demlib.dem_to_hfield(self.terrain)
         if targets is None:

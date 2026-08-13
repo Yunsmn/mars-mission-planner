@@ -33,12 +33,41 @@ def synthesize(n: int = 64, amplitude_m: float = 0.22, seed: int = 42) -> np.nda
     return field.astype(np.float64)
 
 
-def load_dem(path: str) -> tuple[np.ndarray, dict]:
-    """Load a prepared DEM (.npy for now; rasterio GeoTIFF path added when real data lands)."""
+def load_dem(path: str, meters_per_cell: float = 6.0) -> tuple[np.ndarray, dict]:
+    """Load a prepared DEM (.npy or GeoTIFF).
+    
+    Args:
+        path: Path to DEM file (.npy or .tif)
+        meters_per_cell: Resolution in meters per cell
+    
+    Returns:
+        Tuple of (dem array, metadata dict)
+    """
+    import os
+    
+    if not os.path.exists(path):
+        # Fall back to synthetic if file doesn't exist
+        import logging
+        logging.getLogger(__name__).warning(f"DEM not found at {path}, using synthetic")
+        dem = synthesize()
+        return dem, {"meters_per_cell": meters_per_cell, "source": "synthetic"}
+    
     if path.endswith(".npy"):
         dem = np.load(path)
-        return dem, {"meters_per_cell": 6.0, "source": path}
-    raise NotImplementedError("TODO(bob/later): GeoTIFF via rasterio in data/prepare.py")
+        return dem, {"meters_per_cell": meters_per_cell, "source": path}
+    
+    elif path.endswith((".tif", ".tiff")):
+        try:
+            import rasterio
+            with rasterio.open(path) as src:
+                dem = src.read(1)
+                transform = src.transform
+                actual_res = abs(transform[0])
+                return dem, {"meters_per_cell": actual_res, "source": path}
+        except ImportError:
+            raise ImportError("rasterio required for GeoTIFF. Install: pip install rasterio")
+    
+    raise ValueError(f"Unsupported DEM format: {path}")
 
 
 def slope_map(dem: np.ndarray, meters_per_cell: float) -> np.ndarray:
