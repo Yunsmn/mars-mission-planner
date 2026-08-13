@@ -22,6 +22,14 @@ logger = logging.getLogger(__name__)
 # Real-world terrain bounds (match world/sim.py)
 TERRAIN_RADIUS = 5.0  # world spans [-5, 5] m
 
+# The planning procedure the model must follow (model/SKILL.md). Loaded once and injected into
+# every prompt so the compact model follows a reliable process instead of improvising.
+from pathlib import Path as _Path
+try:
+    _SKILL = (_Path(__file__).resolve().parent / "SKILL.md").read_text(encoding="utf-8")
+except Exception:
+    _SKILL = ""
+
 
 class Proposer:
     """IBM Granite proposer via Ollama API (local, offline)."""
@@ -89,7 +97,9 @@ class Proposer:
         
         sampling_alert = "\n".join(sampling_ready) if sampling_ready else ""
         
-        prompt = f"""You are the onboard planner for a Mars rover. Propose {k} candidate action sequences.
+        prompt = f"""{_SKILL}
+
+=== FOLLOW THE PROCEDURE ABOVE. Propose {k} candidate action sequences for the state below. ===
 
 CURRENT STATE:
 - Position: ({state.pose.xy[0]:.1f}, {state.pose.xy[1]:.1f})
