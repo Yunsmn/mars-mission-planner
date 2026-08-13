@@ -99,7 +99,7 @@ class Proposer:
         
         prompt = f"""{_SKILL}
 
-=== FOLLOW THE PROCEDURE ABOVE. Propose {k} candidate action sequences for the state below. ===
+=== Use the notes above as guidance — you make the call. Propose {k} candidate action sequences for the state below. ===
 
 CURRENT STATE:
 - Position: ({state.pose.xy[0]:.1f}, {state.pose.xy[1]:.1f})
