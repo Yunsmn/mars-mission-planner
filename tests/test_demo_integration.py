@@ -95,16 +95,10 @@ def test_demo_with_mock_proposer():
         assert log.final_state.battery_pct > flat_cfg['battery_reserve_pct'], "Should respect battery reserve"
         
         logger.info("\n✓ Demo integration test PASSED!")
-        return True
         
     except Exception as e:
         logger.error(f"Mission failed: {e}", exc_info=True)
-        return False
+        raise
 
 if __name__ == '__main__':
-    try:
-        success = test_demo_with_mock_proposer()
-        sys.exit(0 if success else 1)
-    except Exception as e:
-        logger.error(f"Test failed: {e}", exc_info=True)
-        sys.exit(1)
+    test_demo_with_mock_proposer()

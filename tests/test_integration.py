@@ -94,12 +94,6 @@ def test_basic_integration():
     logger.info(f"\nTotal samples collected: {collected_count}")
     
     logger.info("\n✓ Integration test passed!")
-    return True
 
 if __name__ == '__main__':
-    try:
-        success = test_basic_integration()
-        sys.exit(0 if success else 1)
-    except Exception as e:
-        logger.error(f"Integration test failed: {e}", exc_info=True)
-        sys.exit(1)
+    test_basic_integration()
