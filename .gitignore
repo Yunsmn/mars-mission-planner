@@ -37,3 +37,6 @@ demo/out/
 # keep committed demo figures
 !docs/figures/
 !docs/figures/**
+
+# showcase vendored libs (downloaded, inlined into showcase.html)
+web/vendor/
