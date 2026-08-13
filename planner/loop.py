@@ -67,11 +67,14 @@ def _advance_toward_target(world, pose, battery_pct: float, cfg: dict) -> Decisi
     if not uncollected or battery_pct <= reserve:
         return None
     px, py = pose.xy
-    nearest = min(uncollected, key=lambda t: (t.xy[0] - px) ** 2 + (t.xy[1] - py) ** 2)
+    # Prefer the highest science value; break ties by nearest (least energy).
+    best = max(uncollected, key=lambda t: (t.science_value,
+                                           -((t.xy[0] - px) ** 2 + (t.xy[1] - py) ** 2)))
     return Decision(
-        action=Action(kind=ActionKind.DRIVE, params={"xy": nearest.xy}),
+        action=Action(kind=ActionKind.DRIVE, params={"xy": best.xy}),
         rationale=(f"Objective unmet ({len(uncollected)} target(s) left, battery "
-                   f"{battery_pct:.0f}%) — advancing to nearest target {nearest.id}."),
+                   f"{battery_pct:.0f}%) — advancing to best-value target {best.id} "
+                   f"(science {best.science_value:.2f})."),
         scores=(),
     )
 

@@ -27,6 +27,8 @@ class SampleTarget:
     id: str
     xy: tuple[float, float]
     collected: bool = False
+    science_value: float = 0.5      # data-driven (CRISM); higher = better science
+    mineral_class: str = "unknown"
 
 
 def _rover_xml(hf: dict, targets: list[SampleTarget]) -> str:
@@ -102,7 +104,13 @@ class MarsSim:
         self.hf = demlib.dem_to_hfield(self.terrain)
         if targets is None:
             targets = [("sample_a", 1.6, 0.8), ("sample_b", -1.2, 1.5), ("sample_c", 0.5, -1.8)]
-        self.targets = [SampleTarget(i, (x, y)) for i, x, y in targets]
+        # targets may be (id, x, y) or (id, x, y, science_value[, mineral_class])
+        self.targets = [
+            SampleTarget(t[0], (t[1], t[2]),
+                         science_value=t[3] if len(t) > 3 else 0.5,
+                         mineral_class=t[4] if len(t) > 4 else "unknown")
+            for t in targets
+        ]
 
         self.model = mujoco.MjModel.from_xml_string(_rover_xml(self.hf, self.targets))
         self.model.hfield_data[:] = self.hf["data"].ravel().astype(np.float32)
@@ -162,8 +170,10 @@ class MarsSim:
                 break
             heading_err = math.atan2(math.sin(math.atan2(dy, dx) - yaw),
                                      math.cos(math.atan2(dy, dx) - yaw))
-            base = 14.0 * min(1.0, dist / 0.5)
-            turn = 10.0 * heading_err
+            # Turn in place when badly misaligned (avoids spin-stall on large heading changes),
+            # then drive forward while correcting.
+            base = 0.0 if abs(heading_err) > 0.6 else 14.0 * min(1.0, dist / 0.5)
+            turn = 12.0 * heading_err
             vL = float(np.clip(base - turn, -30, 30))
             vR = float(np.clip(base + turn, -30, 30))
             self.step(vL, vR, n=10)
