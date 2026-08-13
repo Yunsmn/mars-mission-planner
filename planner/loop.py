@@ -293,8 +293,13 @@ def run_mission(
             decision = decide_next_action(state, current_perception, env, model, cfg,
                                           consecutive_observations, observations_per_target)
 
-        # Progress guarantee: never idle while the objective is unmet and resources allow.
-        if decision.action.kind == ActionKind.HOLD:
+        # Progress guarantee: allow at most ONE non-advancing action (HOLD/SCAN/OBSERVE) in a
+        # row. If the model keeps stalling (e.g. proposing SCAN-first sequences that never
+        # execute the drive) while the objective is unmet and battery allows, advance to the
+        # nearest uncollected target so the mission cannot loop.
+        non_advancing = decision.action.kind in (ActionKind.HOLD, ActionKind.SCAN, ActionKind.OBSERVE)
+        already_stalled = decision.action.kind == ActionKind.HOLD or consecutive_observations >= 1
+        if non_advancing and already_stalled:
             advance = _advance_toward_target(world, current_pose, current_battery, cfg)
             if advance is not None:
                 decision = advance
