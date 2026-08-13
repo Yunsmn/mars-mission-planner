@@ -33,3 +33,7 @@ demo/out/
 .DS_Store
 .idea/
 .vscode/
+
+# keep committed demo figures
+!docs/figures/
+!docs/figures/**
