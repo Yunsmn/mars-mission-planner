@@ -58,6 +58,24 @@ def _reflex_sample(world, pose) -> Decision | None:
     return None
 
 
+def _advance_toward_target(world, pose, battery_pct: float, cfg: dict) -> Decision | None:
+    """Progress guarantee: if the model yields no productive action (HOLD) while the objective
+    is unmet and battery allows, advance toward the nearest uncollected target. A real autonomy
+    stack does not idle with work remaining and a full battery."""
+    reserve = cfg.get("battery_reserve_pct", 15.0)
+    uncollected = [t for t in world.targets if not t.collected]
+    if not uncollected or battery_pct <= reserve:
+        return None
+    px, py = pose.xy
+    nearest = min(uncollected, key=lambda t: (t.xy[0] - px) ** 2 + (t.xy[1] - py) ** 2)
+    return Decision(
+        action=Action(kind=ActionKind.DRIVE, params={"xy": nearest.xy}),
+        rationale=(f"Objective unmet ({len(uncollected)} target(s) left, battery "
+                   f"{battery_pct:.0f}%) — advancing to nearest target {nearest.id}."),
+        scores=(),
+    )
+
+
 def decide_next_action(
     state: MissionState,
     perception: Perception,
@@ -274,6 +292,12 @@ def run_mission(
             env = surrogate.create_surrogate_env(world, cfg)
             decision = decide_next_action(state, current_perception, env, model, cfg,
                                           consecutive_observations, observations_per_target)
+
+        # Progress guarantee: never idle while the objective is unmet and resources allow.
+        if decision.action.kind == ActionKind.HOLD:
+            advance = _advance_toward_target(world, current_pose, current_battery, cfg)
+            if advance is not None:
+                decision = advance
         decisions.append(decision)
         
         # Log decision

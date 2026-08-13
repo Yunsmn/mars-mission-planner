@@ -10,7 +10,7 @@ constraints:
   p_success_min: 0.70         # min mean success probability to consider an action
 
 planner:
-  n_candidates: 1             # FAST MODE: single candidate per decision
+  n_candidates: 2             # 2 candidates (one Granite call) — keeps the reject-riskier-alternative beat
   n_rollouts: 10              # FAST MODE: minimal rollouts for speed
   horizon_steps: 40           # FAST MODE: shorter horizon
   cvar_quantile: 0.90         # tail definition for CVaR (worst 10%)
