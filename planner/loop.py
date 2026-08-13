@@ -34,6 +34,30 @@ class MissionLog:
     success: bool
 
 
+SAMPLE_REACH_M = 0.55  # within this distance the instrument can sample (matches MarsSim.sample)
+
+
+def _reflex_sample(world, pose) -> Decision | None:
+    """Execution reflex: if the rover is within instrument reach of an uncollected target,
+    sample it directly — no model call. A rover doesn't invoke an LLM to actuate a pickup it
+    is already positioned over; the model is reserved for *planning* (which target, how to get
+    there). This is what lets the mission complete quickly and reliably."""
+    uncollected = [t for t in world.targets if not t.collected]
+    if not uncollected:
+        return None
+    px, py = pose.xy
+    nearest = min(uncollected, key=lambda t: (t.xy[0] - px) ** 2 + (t.xy[1] - py) ** 2)
+    dist = ((nearest.xy[0] - px) ** 2 + (nearest.xy[1] - py) ** 2) ** 0.5
+    if dist <= SAMPLE_REACH_M:
+        return Decision(
+            action=Action(kind=ActionKind.SAMPLE, params={"target": nearest.id}),
+            rationale=(f"Within instrument reach of {nearest.id} ({dist:.2f} m) — sampling "
+                       f"directly (execution reflex; model reserved for planning)."),
+            scores=(),
+        )
+    return None
+
+
 def decide_next_action(
     state: MissionState,
     perception: Perception,
@@ -241,11 +265,15 @@ def run_mission(
             if voi.should_replan(state, last_perception, current_perception):
                 logger.info("Replanning triggered by perception change")
         
-        # Create surrogate environment from real world terrain
-        env = surrogate.create_surrogate_env(world, cfg)
-        
-        # DECIDE - propose-and-verify loop
-        decision = decide_next_action(state, current_perception, env, model, cfg, consecutive_observations, observations_per_target)
+        # REFLEX first: sample immediately if we're already on an uncollected target
+        # (no slow model call to pick up something we're standing on).
+        decision = _reflex_sample(world, current_pose)
+        if decision is None:
+            # DECIDE - the model plans the next move (which target / how to get there),
+            # verified by the surrogate and gated on tail-risk.
+            env = surrogate.create_surrogate_env(world, cfg)
+            decision = decide_next_action(state, current_perception, env, model, cfg,
+                                          consecutive_observations, observations_per_target)
         decisions.append(decision)
         
         # Log decision
