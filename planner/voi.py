@@ -119,14 +119,16 @@ def maybe_observe(
     state: MissionState,
     perception: Perception,
     env,
-    cfg: dict
+    cfg: dict,
+    observations_per_target: dict[str, int] | None = None
 ) -> Action | None:
     """Decide whether to observe before acting.
     
     Returns an observation action if:
     1. The best two candidates are close in value (ambiguous decision)
-    2. The expected VoI exceeds the observation cost
-    3. We haven't exceeded the observation budget for this mission
+    2. The gap is NON-ZERO (observation can actually help resolve it)
+    3. The expected VoI exceeds the observation cost
+    4. We haven't exceeded ≤1 observation per target
     
     Args:
         safe: List of safe candidate scores
@@ -134,6 +136,7 @@ def maybe_observe(
         perception: Current perception
         env: Environment
         cfg: Configuration dict
+        observations_per_target: Dict tracking observations per target (for ≤1 cap)
     
     Returns:
         An observation action if VoI justifies it, None otherwise
@@ -142,22 +145,28 @@ def maybe_observe(
     if len(safe) < 2:
         return None
     
-    # Check observation budget (prevent infinite loops)
-    # Track observations in mission state or config
-    max_consecutive_observations = cfg.get('max_consecutive_observations', 2)
-    
-    # Simple heuristic: if localization uncertainty is very low, don't observe
-    # (indicates we've already done enough observations)
-    if state.localization_sigma < 0.5:
-        return None
-    
     # Calculate value gap between top candidates
     gap = best_gap(safe)
     threshold = cfg.get('voi_gap_threshold', 0.15)
     
-    # Only consider observation if decision is ambiguous
-    if gap >= threshold:
+    # CRITICAL FIX: Only observe if gap is small BUT NON-ZERO
+    # A 0.00 gap (tied proposals) cannot be resolved by observation
+    # Gap must be > 0.01 (real ambiguity) and < threshold (close enough to matter)
+    if gap < 0.01 or gap >= threshold:
         return None
+    
+    # Don't observe if localization uncertainty is already very low
+    # (indicates we've already done enough observations)
+    if state.localization_sigma < 0.5:
+        return None
+    
+    # CAP: Check if we've already observed the closest target
+    if observations_per_target and state.remaining:
+        closest_target = min(state.remaining, 
+                           key=lambda t: ((t.xy[0] - state.pose.xy[0])**2 + 
+                                         (t.xy[1] - state.pose.xy[1])**2)**0.5)
+        if observations_per_target.get(closest_target.id, 0) >= 1:
+            return None  # Already observed this target once
     
     # Get cheapest useful observation
     obs = cheapest_observation(state, perception)

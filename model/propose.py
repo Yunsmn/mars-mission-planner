@@ -59,15 +59,31 @@ class Proposer:
     
     def _build_prompt(self, state: MissionState, perception: Perception, k: int) -> str:
         """Build the prompt for Gemma 4."""
-        # Format visible targets
-        targets_str = "\n".join([
-            f"  - {t.id}: xy=({t.xy[0]:.1f}, {t.xy[1]:.1f}), "
-            f"science_value={t.science_value:.2f}, mineral={t.mineral_class}"
-            for t in perception.visible_targets
-        ])
+        # Calculate distances to targets and format with distance info
+        import math
+        targets_with_dist = []
+        for t in perception.visible_targets:
+            dist = math.hypot(t.xy[0] - state.pose.xy[0], t.xy[1] - state.pose.xy[1])
+            in_range = "IN SAMPLING RANGE" if dist < 0.6 else f"{dist:.1f}m away"
+            targets_with_dist.append(
+                f"  - {t.id}: xy=({t.xy[0]:.1f}, {t.xy[1]:.1f}), "
+                f"distance={in_range}, "
+                f"science_value={t.science_value:.2f}, mineral={t.mineral_class}"
+            )
+        
+        targets_str = "\n".join(targets_with_dist)
         
         # Format already collected
         collected_str = ", ".join(state.collected) if state.collected else "none"
+        
+        # Check if any target is in sampling range
+        sampling_ready = []
+        for t in perception.visible_targets:
+            dist = math.hypot(t.xy[0] - state.pose.xy[0], t.xy[1] - state.pose.xy[1])
+            if dist < 0.6:
+                sampling_ready.append(f"*** TARGET {t.id} IS IN SAMPLING RANGE (distance={dist:.2f}m < 0.6m) - SAMPLE IT NOW! ***")
+        
+        sampling_alert = "\n".join(sampling_ready) if sampling_ready else ""
         
         prompt = f"""You are the onboard planner for a Mars rover. Propose {k} candidate action sequences.
 
@@ -78,6 +94,9 @@ CURRENT STATE:
 - Localization uncertainty: {state.localization_sigma:.2f} m
 - Sol time: {state.sol_time:.2f}
 - Collected samples: {collected_str}
+- Samples needed: {2 - len(state.collected)} more to complete mission
+
+{sampling_alert}
 
 VISIBLE TARGETS:
 {targets_str}
@@ -90,6 +109,8 @@ TERRAIN CONSTRAINTS:
 AVAILABLE ACTIONS:
 1. DRIVE to (x, y) - navigate to coordinates (must be within ±5m)
 2. SAMPLE target_id - collect sample at current location (use exact target id)
+   - IMPORTANT: If rover is within ~0.6m of a target, SAMPLE it immediately
+   - Sampling range: approximately 0.6 meters
 3. SCAN - refresh perception
 4. OBSERVE - take additional observation to reduce uncertainty
 5. HOLD - safe default, do nothing
@@ -101,23 +122,22 @@ CONSTRAINTS:
 - Risk ceiling: avoid high-slope/rough terrain
 - Prioritize high science value targets
 
+SAMPLING STRATEGY:
+- Check distance to each visible target
+- If within ~0.6m of an uncollected target, include SAMPLE in your sequence
+- Drive-then-sample sequences are efficient for nearby targets
+- Mission goal: collect 2 samples
+
 Generate {k} diverse candidate sequences. Each sequence should be 1-3 actions.
-Consider: direct routes to nearby targets, cautious routes with scans, high-value targets.
+Consider: 
+- If near a target (<0.6m), sample it
+- Direct drive-and-sample routes to nearby high-value targets
+- Cautious routes with scans for distant targets
 
-OUTPUT FORMAT (JSON array of sequences):
+OUTPUT FORMAT - JSON array only, no other text:
 [
-  [
-    {{"action": "DRIVE", "params": {{"xy": [1.6, 0.8]}}}},
-    {{"action": "SAMPLE", "params": {{"target": "sample_a"}}}}
-  ],
-  [
-    {{"action": "SCAN", "params": {{}}}},
-    {{"action": "DRIVE", "params": {{"xy": [-1.2, 1.5]}}}},
-    {{"action": "SAMPLE", "params": {{"target": "sample_b"}}}}
-  ]
+  [{{"action": "DRIVE", "params": {{"xy": [1.6, 0.8]}}}}, {{"action": "SAMPLE", "params": {{"target": "sample_a"}}}}]
 ]
-
-Respond with ONLY the JSON array, no other text.
 """
         return prompt
     
@@ -127,14 +147,17 @@ Respond with ONLY the JSON array, no other text.
             "model": self.name,
             "prompt": prompt,
             "temperature": self.temperature,
-            "stream": False
+            "stream": False,
+            "options": {
+                "num_predict": 512  # Cap output tokens for speed (P2 optimization)
+            }
         }
         
         try:
             response = requests.post(
                 self.endpoint,
                 json=payload,
-                timeout=300  # Increased timeout for gemma3:4b (5 minutes)
+                timeout=120  # Reduced timeout with token cap
             )
             response.raise_for_status()
             

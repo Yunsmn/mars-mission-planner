@@ -10,17 +10,18 @@ constraints:
   p_success_min: 0.70         # min mean success probability to consider an action
 
 planner:
-  n_candidates: 3             # action sequences the model proposes per decision
-  n_rollouts: 20              # surrogate rollouts per candidate
-  horizon_steps: 100          # rollout horizon
+  n_candidates: 1             # FAST MODE: single candidate per decision
+  n_rollouts: 10              # FAST MODE: minimal rollouts for speed
+  horizon_steps: 40           # FAST MODE: shorter horizon
   cvar_quantile: 0.90         # tail definition for CVaR (worst 10%)
   voi_gap_threshold: 0.15     # if best two candidates are closer than this, consider observing
+  max_consecutive_observations: 2  # cap consecutive observations
   seed: 42                    # deterministic demo
 
 model:
-  name: gemma3:4b              # local model via Ollama (gemma3:4b for better reasoning)
+  name: gemma3:4b              # local model via Ollama
   host: http://localhost:11434
-  temperature: 0.7            # some diversity across the k proposals
+  temperature: 0.5            # lower temperature for faster, more focused responses
 
 power:
   source: solar               # justifies dust-opacity -> energy coupling

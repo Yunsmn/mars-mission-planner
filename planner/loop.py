@@ -40,7 +40,8 @@ def decide_next_action(
     env: surrogate.SurrogateEnv,
     model,
     cfg: dict,
-    consecutive_observations: int = 0
+    consecutive_observations: int = 0,
+    observations_per_target: dict[str, int] | None = None
 ) -> Decision:
     """The core propose-and-verify loop for one decision cycle.
     
@@ -120,7 +121,7 @@ def decide_next_action(
     max_consecutive_obs = cfg.get('max_consecutive_observations', 2)
     
     if safe and consecutive_observations < max_consecutive_obs:
-        obs_action = voi.maybe_observe(safe, state, perception, env, cfg)
+        obs_action = voi.maybe_observe(safe, state, perception, env, cfg, observations_per_target)
         
         if obs_action is not None:
             logger.info(f"VoI gate triggered: observation recommended (consecutive: {consecutive_observations + 1}/{max_consecutive_obs})")
@@ -202,6 +203,8 @@ def run_mission(
     total_energy = 0.0
     last_perception = None
     consecutive_observations = 0
+    observations_per_target = {}  # Track observations per target
+    loc_sigma = 1.0  # Initial localization uncertainty
     
     # Mission loop
     for step in range(max_steps):
@@ -213,8 +216,9 @@ def run_mission(
         current_battery = cap.battery()
         
         # Build mission state with updated localization uncertainty
-        # Reduce uncertainty after observations
-        loc_sigma = max(0.1, 1.0 - (consecutive_observations * 0.3))
+        # Uncertainty reduces with observations but doesn't fully reset after drives
+        # Each observation reduces uncertainty by 0.2, minimum 0.1
+        # Drives increase uncertainty slightly (0.05) due to odometry drift
         
         state = MissionState(
             pose=current_pose,
@@ -241,7 +245,7 @@ def run_mission(
         env = surrogate.create_surrogate_env(world, cfg)
         
         # DECIDE - propose-and-verify loop
-        decision = decide_next_action(state, current_perception, env, model, cfg, consecutive_observations)
+        decision = decide_next_action(state, current_perception, env, model, cfg, consecutive_observations, observations_per_target)
         decisions.append(decision)
         
         # Log decision
@@ -251,9 +255,19 @@ def run_mission(
         # EXECUTE - call capability API
         action = decision.action
         
-        # Track consecutive observations
+        # Track consecutive observations and update localization uncertainty
         if action.kind in (ActionKind.OBSERVE, ActionKind.SCAN):
             consecutive_observations += 1
+            # Reduce localization uncertainty with observations
+            loc_sigma = max(0.1, loc_sigma - 0.2)
+            
+            # Track observations per target (for capping at ≤1 per target)
+            if action.kind == ActionKind.OBSERVE and state.remaining:
+                # Find closest target being observed
+                closest_target = min(state.remaining, 
+                                   key=lambda t: ((t.xy[0] - state.pose.xy[0])**2 + 
+                                                 (t.xy[1] - state.pose.xy[1])**2)**0.5)
+                observations_per_target[closest_target.id] = observations_per_target.get(closest_target.id, 0) + 1
         else:
             consecutive_observations = 0  # Reset on action execution
         
@@ -265,6 +279,9 @@ def run_mission(
             battery_after = result.get('battery_pct', cap.battery())
             energy_used = battery_before - battery_after
             total_energy += energy_used
+            
+            # Increase localization uncertainty slightly due to odometry drift
+            loc_sigma = min(2.0, loc_sigma + 0.05)
             
             if not result.get('success', False):
                 logger.warning("Drive failed!")
