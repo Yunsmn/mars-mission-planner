@@ -1,0 +1,7 @@
+{"id":"9f4c322c-692d-40be-b0ad-f5c15bcba4a9","ts":"2026-08-13T11:56:27.389Z","path":"/home/phecda/projects/mars-mission-planner/data/prepare.py","version":"1.0.0","taskID":"30ca4649-55ce-4e15-8372-5396fb5e9398"}
+{"id":"0d893c7b-42db-478d-940b-e3a9827ab5e7","ts":"2026-08-13T11:56:44.058Z","path":"/home/phecda/projects/mars-mission-planner/data/science_value.py","version":"1.0.0","taskID":"30ca4649-55ce-4e15-8372-5396fb5e9398"}
+{"id":"382cc30e-f4e3-44ba-9806-b35baff86aac","ts":"2026-08-13T11:57:03.941Z","path":"/home/phecda/projects/mars-mission-planner/data/dust.py","version":"1.0.0","taskID":"30ca4649-55ce-4e15-8372-5396fb5e9398"}
+{"id":"6c765a0a-ce70-4b7e-8480-6fe851c2594f","ts":"2026-08-13T11:57:18.153Z","path":"/home/phecda/projects/mars-mission-planner/world/dem.py","version":"1.0.0","taskID":"30ca4649-55ce-4e15-8372-5396fb5e9398"}
+{"id":"4f8a656b-aa20-42f8-bb07-3f355a22d4a2","ts":"2026-08-13T11:57:30.473Z","path":"/home/phecda/projects/mars-mission-planner/world/sim.py","version":"1.0.0","taskID":"30ca4649-55ce-4e15-8372-5396fb5e9398"}
+{"id":"9f985478-92d8-46e6-ab24-430a4a191d33","ts":"2026-08-13T11:57:49.218Z","path":"/home/phecda/projects/mars-mission-planner/world/sensors.py","version":"1.0.0","taskID":"30ca4649-55ce-4e15-8372-5396fb5e9398"}
+{"id":"2b1e4f4f-7308-4736-b212-57ba86c675ce","ts":"2026-08-13T11:58:09.989Z","path":"/home/phecda/projects/mars-mission-planner/data/prepare.py","version":"1.0.0","taskID":"30ca4649-55ce-4e15-8372-5396fb5e9398"}
