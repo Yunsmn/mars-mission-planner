@@ -80,6 +80,12 @@ def font_faces() -> str:
     return "\n".join(faces)
 
 
+def _video_uri(path: str = "web/vendor/mission.mp4") -> str:
+    if not os.path.exists(path):
+        return ""
+    return "data:video/mp4;base64," + base64.b64encode(open(path, "rb").read()).decode()
+
+
 STYLE = """
   * { margin: 0; box-sizing: border-box; }
   :root {
@@ -107,6 +113,7 @@ STYLE = """
   .main { display: grid; grid-template-columns: 1fr 316px; min-height: 0; }
   .viewport { position: relative; overflow: hidden; }
   #app { position: absolute; inset: 0; }
+  .vid { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #0d0d0d; }
   .tick { position: absolute; width: 14px; height: 14px; border: 0 solid var(--text3); opacity: 0.55; pointer-events: none; }
   .tick.tl { top: 12px; left: 12px; border-top-width: 1px; border-left-width: 1px; }
   .tick.tr { top: 12px; right: 12px; border-top-width: 1px; border-right-width: 1px; }
@@ -157,7 +164,7 @@ STYLE = """
 """
 
 
-def body(data: dict, abl=None) -> str:
+def body(data: dict, abl=None, video: str = "") -> str:
     steps = "".join(
         f'<div class="step"><span class="n">{i:02d}</span>'
         f'<span class="act">{d["act"]}</span><span class="to">{d["to"]}</span></div>'
@@ -191,12 +198,14 @@ def body(data: dict, abl=None) -> str:
 </div>
 <div class="main">
   <div class="viewport">
-    <div id="app"></div>
+    <video class="vid" autoplay loop muted playsinline>
+      <source src="{video}" type="video/mp4">
+    </video>
     <span class="tick tl"></span><span class="tick tr"></span>
     <span class="tick bl"></span><span class="tick br"></span>
-    <div class="vp-status" id="status">0 / 0 samples cached</div>
-    <div class="vp-note">10 m patch &middot; morphology from a 60 km MOLA window</div>
-    <div class="vp-hint">drag &middot; scroll to zoom</div>
+    <div class="vp-status">{samp} / 2 samples cached</div>
+    <div class="vp-note">real MuJoCo simulation &middot; real Jezero MOLA terrain</div>
+    <div class="vp-hint">recorded mission playback</div>
   </div>
   <aside class="rail">
     <section>
@@ -227,23 +236,16 @@ def build():
     data = export_data()
     abl = (json.load(open("data/derived/ablation.json", encoding="utf-8"))
            if os.path.exists("data/derived/ablation.json") else None)
-    libs = vendor()
     fonts = font_faces()
-    scene = open("web/scene.js", encoding="utf-8").read()
+    video = _video_uri()
 
-    scripts = (
-        f"<script>{libs['three.min.js']}</script>\n"
-        f"<script>{libs['OrbitControls.js']}</script>\n"
-        f"<script>window.DATA={json.dumps(data, separators=(',', ':'))};</script>\n"
-        f"<script>{scene}</script>"
-    )
     inner = (f"<title>MARVIN — Autonomous Mars Mission Planner</title>\n"
-             f"<style>{fonts}\n{STYLE}</style>\n{body(data, abl)}\n{scripts}")
+             f"<style>{fonts}\n{STYLE}</style>\n{body(data, abl, video)}")
 
     full = ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             "<title>MARVIN — Autonomous Mars Mission Planner</title>"
-            f"<style>{fonts}\n{STYLE}</style></head><body>{body(data, abl)}{scripts}</body></html>")
+            f"<style>{fonts}\n{STYLE}</style></head><body>{body(data, abl, video)}</body></html>")
 
     os.makedirs("web", exist_ok=True)
     open("web/showcase.html", "w", encoding="utf-8").write(full)
