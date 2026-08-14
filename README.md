@@ -115,8 +115,11 @@ uv pip install --python .venv -r requirements.txt
 ollama pull granite4.1:3b          # IBM Granite 4.1, local & offline
 
 .venv/bin/python -m demo.run        # full autonomous mission (Granite)
+.venv/bin/python -m demo.cli        # interactive: drive the rover yourself, or ask Granite to plan
+.venv/bin/python -m demo.scenario   # value-aware vs. naive target selection (2.3x science)
 .venv/bin/python -m demo.compare    # onboard vs. fixed-plan vs. Earth-in-the-loop
 .venv/bin/python -m demo.animate    # render the mission playback (gif + montage)
+.venv/bin/python -m web.build_showcase   # build the interactive 3D showcase page
 .venv/bin/python -m pytest          # tests
 ```
 
