@@ -1,14 +1,18 @@
 """Build the self-contained MARVIN 3D showcase page.
 
-Exports real mission data (Jezero terrain, rover path, targets), inlines three.js + the scene,
-and writes:
+Design: IBM Plex typography (inlined as woff2 data URIs) + IBM Carbon palette, laid out as a
+planetary-ops console — a header with the Jezero designation, a framed 3D viewport, and a
+monospace telemetry + decision-log rail. Real mission data drives the scene.
+
+Writes:
   web/showcase.html           -- full standalone page (open in a browser or host anywhere)
-  web/showcase_artifact.html  -- body-only variant (for publishing as a shareable artifact)
+  web/showcase_artifact.html  -- body-only variant (for publishing as a shareable link)
 
 Run:  .venv/bin/python -m web.build_showcase
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import subprocess
@@ -18,6 +22,22 @@ VENDOR = {
     "OrbitControls.js": "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js",
 }
 
+FONTS = [
+    ("IBM Plex Sans", 400, "https://cdn.jsdelivr.net/npm/@ibm/plex-sans/fonts/complete/woff2/IBMPlexSans-Regular.woff2"),
+    ("IBM Plex Sans", 600, "https://cdn.jsdelivr.net/npm/@ibm/plex-sans/fonts/complete/woff2/IBMPlexSans-SemiBold.woff2"),
+    ("IBM Plex Mono", 400, "https://cdn.jsdelivr.net/npm/@ibm/plex-mono/fonts/complete/woff2/IBMPlexMono-Regular.woff2"),
+    ("IBM Plex Mono", 500, "https://cdn.jsdelivr.net/npm/@ibm/plex-mono/fonts/complete/woff2/IBMPlexMono-Medium.woff2"),
+]
+
+JEZERO_COORDS = "18.44°N  77.58°E"
+
+
+def _download(url: str, path: str) -> str:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if not os.path.exists(path):
+        subprocess.run(["curl", "-sL", "--max-time", "120", "-o", path, url], check=True)
+    return path
+
 
 def export_data() -> dict:
     from rover import capabilities as cap
@@ -25,92 +45,150 @@ def export_data() -> dict:
 
     sim = MarsSim(seed=42)              # defaults to the real Jezero MOLA terrain
     cap.bind(sim, 1)
-    targets = []
+    targets, decisions = [], []
     for t in sim.targets:
         sim.drive_to(*t.xy)
+        decisions.append({"act": "DRIVE", "to": t.id})
         collect_at = len(sim.trajectory)
         sim.sample(t.id)
+        decisions.append({"act": "SAMPLE", "to": t.id})
         targets.append({"id": t.id, "x": round(t.xy[0], 3), "y": round(t.xy[1], 3),
-                        "collectAt": collect_at, "science": round(t.science_value, 2)})
+                        "collectAt": collect_at})
     return {
         "grid": int(sim.terrain.shape[0]),
         "extent": float(TERRAIN_RADIUS),
         "terrain": [[round(float(v), 4) for v in row] for row in sim.terrain],
         "trajectory": [[round(float(x), 3), round(float(y), 3)] for (x, y) in sim.trajectory],
         "targets": targets,
+        "decisions": decisions,
     }
 
 
-def vendor() -> dict:
-    os.makedirs("web/vendor", exist_ok=True)
-    out = {}
-    for name, url in VENDOR.items():
-        path = f"web/vendor/{name}"
-        if not os.path.exists(path):
-            subprocess.run(["curl", "-sL", "--max-time", "90", "-o", path, url], check=True)
-        out[name] = open(path, encoding="utf-8").read()
-    return out
+def font_faces() -> str:
+    faces = []
+    for fam, wt, url in FONTS:
+        path = _download(url, f"web/vendor/fonts/{url.split('/')[-1]}")
+        b64 = base64.b64encode(open(path, "rb").read()).decode()
+        faces.append(f"@font-face{{font-family:'{fam}';font-weight:{wt};font-style:normal;"
+                     f"font-display:swap;src:url(data:font/woff2;base64,{b64}) format('woff2');}}")
+    return "\n".join(faces)
 
 
 STYLE = """
   * { margin: 0; box-sizing: border-box; }
   :root {
-    --bg:#05060b; --panel:rgba(11,15,24,0.74); --line:rgba(120,150,200,0.16);
-    --ink:#eef2f9; --muted:#93a1bd; --mars:#ff9d5c; --ok:#5fdd8a;
-    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --bg:#161616; --layer:#1f1f1f; --line:#393939; --line-soft:#2a2a2a;
+    --text:#f4f4f4; --text2:#c6c6c6; --text3:#8d8d8d;
+    --blue:#4589ff; --amber:#ff832b; --ok:#42be65;
+    --sans:"IBM Plex Sans", system-ui, sans-serif;
+    --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
   }
-  html, body { height: 100%; background: var(--bg); color: var(--ink);
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
-  #app { position: fixed; inset: 0; }
-  .panel { position: fixed; top: 18px; left: 18px; width: 332px; padding: 20px 22px;
-    background: var(--panel); backdrop-filter: blur(10px);
-    border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 16px 46px rgba(0,0,0,0.5); }
-  .kicker { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.22em;
-    text-transform: uppercase; color: var(--mars); font-weight: 600; }
-  h1 { font-size: 32px; font-weight: 800; letter-spacing: -1px; margin: 6px 0 2px; text-wrap: balance; }
-  .sub { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 15px; }
-  .status { font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--ok);
-    font-variant-numeric: tabular-nums; margin-bottom: 17px; display: flex; align-items: center; gap: 9px; }
-  .status::before { content: ""; width: 8px; height: 8px; border-radius: 50%;
-    background: var(--ok); box-shadow: 0 0 10px var(--ok); }
-  .rows { display: flex; flex-direction: column; gap: 11px; }
-  .row { display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
-    padding-bottom: 11px; border-bottom: 1px solid rgba(255,255,255,0.06); }
-  .row:last-child { border-bottom: 0; padding-bottom: 0; }
-  .lab { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em;
-    text-transform: uppercase; color: var(--muted); white-space: nowrap; }
-  .val { font-size: 13px; text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
-  .val b { color: var(--mars); font-weight: 700; }
-  .foot { margin-top: 17px; font-family: var(--mono); font-size: 11px; color: #8091ad; letter-spacing: 0.03em; }
-  .foot b { color: #8fb0ff; font-weight: 600; }
-  .hint { position: fixed; bottom: 16px; right: 18px; font-family: var(--mono); font-size: 11px;
-    color: #8091ad; background: rgba(11,15,24,0.6); border: 1px solid var(--line);
-    padding: 6px 12px; border-radius: 999px; }
+  html, body { height: 100%; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans);
+    height: 100vh; display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; }
+
+  .hdr { display: flex; justify-content: space-between; align-items: center;
+    padding: 13px 22px; border-bottom: 1px solid var(--line); }
+  .desig { display: flex; align-items: center; gap: 12px; }
+  .mark { width: 11px; height: 11px; background: var(--amber); }
+  .desig .name { font-weight: 600; font-size: 15px; letter-spacing: 0.01em; }
+  .desig .full { font-family: var(--mono); font-size: 11px; color: var(--text3);
+    letter-spacing: 0.02em; padding-left: 12px; border-left: 1px solid var(--line); }
+  .coords { font-family: var(--mono); font-size: 11.5px; color: var(--text2); letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums; }
+  .coords .k { color: var(--text3); }
+
+  .main { display: grid; grid-template-columns: 1fr 316px; min-height: 0; }
+  .viewport { position: relative; overflow: hidden; }
+  #app { position: absolute; inset: 0; }
+  .tick { position: absolute; width: 14px; height: 14px; border: 0 solid var(--text3); opacity: 0.55; pointer-events: none; }
+  .tick.tl { top: 12px; left: 12px; border-top-width: 1px; border-left-width: 1px; }
+  .tick.tr { top: 12px; right: 12px; border-top-width: 1px; border-right-width: 1px; }
+  .tick.bl { bottom: 12px; left: 12px; border-bottom-width: 1px; border-left-width: 1px; }
+  .tick.br { bottom: 12px; right: 12px; border-bottom-width: 1px; border-right-width: 1px; }
+  .vp-status { position: absolute; top: 14px; left: 16px; font-family: var(--mono); font-size: 12px;
+    color: var(--ok); font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 8px; }
+  .vp-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--ok); box-shadow: 0 0 9px var(--ok); }
+  .vp-note { position: absolute; bottom: 14px; left: 16px; font-family: var(--mono); font-size: 10.5px;
+    color: var(--text3); letter-spacing: 0.02em; }
+  .vp-hint { position: absolute; bottom: 14px; right: 16px; font-family: var(--mono); font-size: 10.5px;
+    color: var(--text3); }
+
+  .rail { border-left: 1px solid var(--line); padding: 18px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 22px; }
+  .rail h2 { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--text3); padding-bottom: 7px; border-bottom: 1px solid var(--line); margin-bottom: 11px; }
+  .tel { display: flex; flex-direction: column; gap: 9px; }
+  .tel .r { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .tel .k { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text3); white-space: nowrap; }
+  .tel .v { font-family: var(--mono); font-size: 12px; color: var(--text); text-align: right;
+    font-variant-numeric: tabular-nums; }
+  .tel .v b { color: var(--amber); font-weight: 500; }
+  .log { display: flex; flex-direction: column; }
+  .step { display: grid; grid-template-columns: 20px 68px 1fr; gap: 8px; align-items: baseline;
+    font-family: var(--mono); font-size: 11.5px; padding: 5px 0; border-bottom: 1px solid var(--line-soft); }
+  .step:last-child { border-bottom: 0; }
+  .step .n { color: var(--text3); font-variant-numeric: tabular-nums; }
+  .step .act { color: var(--blue); font-weight: 500; letter-spacing: 0.02em; }
+  .step .to { color: var(--text2); }
+
+  .ftr { display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 22px; border-top: 1px solid var(--line); font-family: var(--mono);
+    font-size: 11px; color: var(--text3); letter-spacing: 0.02em; }
+  .ftr b { color: var(--blue); font-weight: 500; }
 """
 
-BODY = """
-<div id="app"></div>
-<div class="panel">
-  <div class="kicker">IBM AI Builders · Space</div>
-  <h1>MARVIN</h1>
-  <div class="sub">Onboard, offline Mars mission planner. IBM Granite proposes; a physics-lite
-    simulator verifies before the rover moves.</div>
-  <div class="status" id="status">0 / 0 samples cached</div>
-  <div class="rows">
-    <div class="row"><span class="lab">Terrain</span><span class="val">real Jezero DEM · <b>NASA MOLA</b></span></div>
-    <div class="row"><span class="lab">Fast-sim fidelity</span><span class="val">within <b>3%</b> of full physics</span></div>
-    <div class="row"><span class="lab">Science return</span><span class="val"><b>2.3&times;</b> vs. naive selection</span></div>
-    <div class="row"><span class="lab">Time to run</span><span class="val">onboard <b>minutes</b> · Earth <b>~4 mo</b></span></div>
-  </div>
-  <div class="foot">Powered by <b>IBM Granite 4.1</b> · Built with <b>IBM Bob</b></div>
+
+def body(data: dict) -> str:
+    steps = "".join(
+        f'<div class="step"><span class="n">{i:02d}</span>'
+        f'<span class="act">{d["act"]}</span><span class="to">{d["to"]}</span></div>'
+        for i, d in enumerate(data["decisions"], 1)
+    )
+    return f"""
+<div class="hdr">
+  <div class="desig"><span class="mark"></span><span class="name">MARVIN</span>
+    <span class="full">Autonomous Mars Mission Planner</span></div>
+  <div class="coords"><span class="k">JEZERO &middot; MOLA DEM &middot;</span> {JEZERO_COORDS}</div>
 </div>
-<div class="hint">drag to orbit · scroll to zoom</div>
+<div class="main">
+  <div class="viewport">
+    <div id="app"></div>
+    <span class="tick tl"></span><span class="tick tr"></span>
+    <span class="tick bl"></span><span class="tick br"></span>
+    <div class="vp-status" id="status">0 / 0 samples cached</div>
+    <div class="vp-note">10 m patch &middot; morphology from a 60 km MOLA window</div>
+    <div class="vp-hint">drag &middot; scroll to zoom</div>
+  </div>
+  <aside class="rail">
+    <section>
+      <h2>Telemetry</h2>
+      <div class="tel">
+        <div class="r"><span class="k">Terrain</span><span class="v">real Jezero DEM</span></div>
+        <div class="r"><span class="k">Planner</span><span class="v"><b>IBM Granite 4.1</b></span></div>
+        <div class="r"><span class="k">Sim fidelity</span><span class="v">within <b>3%</b></span></div>
+        <div class="r"><span class="k">Science</span><span class="v"><b>2.3&times;</b> vs. naive</span></div>
+        <div class="r"><span class="k">Onboard</span><span class="v">minutes</span></div>
+        <div class="r"><span class="k">Earth-loop</span><span class="v"><b>~4 months</b></span></div>
+      </div>
+    </section>
+    <section>
+      <h2>Decision log</h2>
+      <div class="log">{steps}</div>
+    </section>
+  </aside>
+</div>
+<div class="ftr"><span>Onboard &middot; offline &middot; no network</span>
+  <span>Powered by <b>IBM Granite 4.1</b> &middot; Built with <b>IBM Bob</b></span></div>
 """
 
 
 def build():
     data = export_data()
     libs = vendor()
+    fonts = font_faces()
     scene = open("web/scene.js", encoding="utf-8").read()
 
     scripts = (
@@ -119,24 +197,25 @@ def build():
         f"<script>window.DATA={json.dumps(data, separators=(',', ':'))};</script>\n"
         f"<script>{scene}</script>"
     )
-    inner = f"<title>MARVIN — Autonomous Mars Mission Planner</title>\n<style>{STYLE}</style>\n{BODY}\n{scripts}"
+    inner = (f"<title>MARVIN — Autonomous Mars Mission Planner</title>\n"
+             f"<style>{fonts}\n{STYLE}</style>\n{body(data)}\n{scripts}")
 
     full = ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            f"{inner}</head><body></body></html>")
-    # (scripts run fine at end of head since they build into #app which is created by BODY;
-    #  to be safe, use a body-hosted version for the standalone file:)
-    full = ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             "<title>MARVIN — Autonomous Mars Mission Planner</title>"
-            f"<style>{STYLE}</style></head><body>{BODY}{scripts}</body></html>")
+            f"<style>{fonts}\n{STYLE}</style></head><body>{body(data)}{scripts}</body></html>")
 
     os.makedirs("web", exist_ok=True)
     open("web/showcase.html", "w", encoding="utf-8").write(full)
     open("web/showcase_artifact.html", "w", encoding="utf-8").write(inner)
     print(f"wrote web/showcase.html ({len(full)//1024} KB) and web/showcase_artifact.html")
     print(f"  terrain {data['grid']}x{data['grid']} · path {len(data['trajectory'])} pts · "
-          f"{len(data['targets'])} targets")
+          f"{len(data['targets'])} targets · {len(data['decisions'])} decisions")
+
+
+def vendor() -> dict:
+    return {name: open(_download(url, f"web/vendor/{name}"), encoding="utf-8").read()
+            for name, url in VENDOR.items()}
 
 
 if __name__ == "__main__":

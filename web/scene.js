@@ -5,17 +5,21 @@
   const D = window.DATA;
   const N = D.grid, EXT = D.extent, HEIGHT_EXAG = 7.0;
 
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x05060b);
-  scene.fog = new THREE.FogExp2(0x05060b, 0.012);
+  const app = document.getElementById("app");
+  const W = () => app.clientWidth || window.innerWidth;
+  const H = () => app.clientHeight || window.innerHeight;
 
-  const camera = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 0.1, 400);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x161616);
+  scene.fog = new THREE.FogExp2(0x161616, 0.014);
+
+  const camera = new THREE.PerspectiveCamera(50, W() / H(), 0.1, 400);
   camera.position.set(8.5, 6.5, 9.5);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(innerWidth, innerHeight);
+  renderer.setSize(W(), H());
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  document.getElementById("app").appendChild(renderer.domElement);
+  app.appendChild(renderer.domElement);
 
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
@@ -34,12 +38,6 @@
   const rim = new THREE.DirectionalLight(0x4466aa, 0.5);
   rim.position.set(-6, 4, -7);
   scene.add(rim);
-
-  // starfield
-  const sg = new THREE.BufferGeometry(), sp = [];
-  for (let i = 0; i < 1600; i++) sp.push((Math.random() - 0.5) * 260, (Math.random() - 0.5) * 260, (Math.random() - 0.5) * 260);
-  sg.setAttribute("position", new THREE.Float32BufferAttribute(sp, 3));
-  scene.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0x9fb2d4, size: 0.18, sizeAttenuation: true })));
 
   // terrain height lookup (shared by mesh + rover so they always agree)
   let tmin = 1e9, tmax = -1e9;
@@ -123,10 +121,9 @@
   }
   animate();
 
-  addEventListener("resize", () => {
-    camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
-    renderer.setSize(innerWidth, innerHeight);
-  });
+  new ResizeObserver(() => {
+    camera.aspect = W() / H(); camera.updateProjectionMatrix(); renderer.setSize(W(), H());
+  }).observe(app);
   // stop auto-rotate once the user grabs the scene
   renderer.domElement.addEventListener("pointerdown", () => (controls.autoRotate = false));
 })();
