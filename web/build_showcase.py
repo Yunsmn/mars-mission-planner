@@ -40,27 +40,33 @@ def _download(url: str, path: str) -> str:
 
 
 def export_data() -> dict:
+    # Prefer the recorded REAL Granite mission (web/record_mission.py). Everything shown is
+    # measured from an actual run; no hand-picked numbers.
+    rec = "data/derived/mission_record.json"
+    if os.path.exists(rec):
+        return json.load(open(rec, encoding="utf-8"))
+
+    # fallback: a scripted-real traverse on the real terrain, with the same measured shape
+    import math as _m
     from rover import capabilities as cap
     from world.sim import TERRAIN_RADIUS, MarsSim
-
-    sim = MarsSim(seed=42)              # defaults to the real Jezero MOLA terrain
+    sim = MarsSim(seed=42)
     cap.bind(sim, 1)
     targets, decisions = [], []
     for t in sim.targets:
-        sim.drive_to(*t.xy)
-        decisions.append({"act": "DRIVE", "to": t.id})
+        sim.drive_to(*t.xy); decisions.append({"act": "DRIVE", "to": t.id})
         collect_at = len(sim.trajectory)
-        sim.sample(t.id)
-        decisions.append({"act": "SAMPLE", "to": t.id})
-        targets.append({"id": t.id, "x": round(t.xy[0], 3), "y": round(t.xy[1], 3),
-                        "collectAt": collect_at})
+        sim.sample(t.id); decisions.append({"act": "SAMPLE", "to": t.id})
+        targets.append({"id": t.id, "x": round(t.xy[0], 3), "y": round(t.xy[1], 3), "collectAt": collect_at})
+    traj = [[round(float(x), 3), round(float(y), 3)] for (x, y) in sim.trajectory]
+    dist = sum(_m.dist(traj[i - 1], traj[i]) for i in range(1, len(traj)))
     return {
-        "grid": int(sim.terrain.shape[0]),
-        "extent": float(TERRAIN_RADIUS),
+        "grid": int(sim.terrain.shape[0]), "extent": float(TERRAIN_RADIUS),
         "terrain": [[round(float(v), 4) for v in row] for row in sim.terrain],
-        "trajectory": [[round(float(x), 3), round(float(y), 3)] for (x, y) in sim.trajectory],
-        "targets": targets,
-        "decisions": decisions,
+        "trajectory": traj, "targets": targets, "decisions": decisions,
+        "stats": {"decisions": len(decisions), "samples": sum(t.collected for t in sim.targets),
+                  "distance_m": round(dist, 2), "battery_used_pct": round(100 - sim.battery_pct, 1),
+                  "sim_seconds": round(sim.sol_time, 1)},
     }
 
 
@@ -147,6 +153,11 @@ def body(data: dict) -> str:
         f'<span class="act">{d["act"]}</span><span class="to">{d["to"]}</span></div>'
         for i, d in enumerate(data["decisions"], 1)
     )
+    s = data.get("stats") or {}
+    dec = s.get("decisions", len(data["decisions"]))
+    samp = s.get("samples", "—")
+    distm = s.get("distance_m", "—")
+    batt = s.get("battery_used_pct", "—")
     return f"""
 <div class="hdr">
   <div class="desig"><span class="mark"></span><span class="name">MARVIN</span>
@@ -166,12 +177,13 @@ def body(data: dict) -> str:
     <section>
       <h2>Telemetry</h2>
       <div class="tel">
-        <div class="r"><span class="k">Terrain</span><span class="v">real Jezero DEM</span></div>
+        <div class="r"><span class="k">Site</span><span class="v">Jezero &middot; MOLA DEM</span></div>
         <div class="r"><span class="k">Planner</span><span class="v"><b>IBM Granite 4.1</b></span></div>
-        <div class="r"><span class="k">Sim fidelity</span><span class="v">within <b>3%</b></span></div>
-        <div class="r"><span class="k">Science</span><span class="v"><b>2.3&times;</b> vs. naive</span></div>
-        <div class="r"><span class="k">Onboard</span><span class="v">minutes</span></div>
-        <div class="r"><span class="k">Earth-loop</span><span class="v"><b>~4 months</b></span></div>
+        <div class="r"><span class="k">Decisions</span><span class="v"><b>{dec}</b> &middot; 0 ground</span></div>
+        <div class="r"><span class="k">Samples</span><span class="v">{samp} / 2 cached</span></div>
+        <div class="r"><span class="k">Traverse</span><span class="v">{distm} m</span></div>
+        <div class="r"><span class="k">Battery used</span><span class="v">{batt} %</span></div>
+        <div class="r"><span class="k">Ground-ops eqv.</span><span class="v"><b>~{dec} sols</b> vs 1 cycle</span></div>
       </div>
     </section>
     <section>
@@ -181,7 +193,7 @@ def body(data: dict) -> str:
   </aside>
 </div>
 <div class="ftr"><span>Onboard &middot; offline &middot; no network</span>
-  <span>Powered by <b>IBM Granite 4.1</b> &middot; Built with <b>IBM Bob</b></span></div>
+  <span>Powered by <b>IBM Granite 4.1</b></span></div>
 """
 
 
