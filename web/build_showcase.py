@@ -85,7 +85,7 @@ STYLE = """
   :root {
     --bg:#161616; --layer:#1f1f1f; --line:#393939; --line-soft:#2a2a2a;
     --text:#f4f4f4; --text2:#c6c6c6; --text3:#8d8d8d;
-    --blue:#4589ff; --amber:#ff832b; --ok:#42be65;
+    --blue:#4589ff; --amber:#ff832b; --ok:#42be65; --danger:#fa4d56;
     --sans:"IBM Plex Sans", system-ui, sans-serif;
     --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
   }
@@ -139,6 +139,16 @@ STYLE = """
   .step .n { color: var(--text3); font-variant-numeric: tabular-nums; }
   .step .act { color: var(--blue); font-weight: 500; letter-spacing: 0.02em; }
   .step .to { color: var(--text2); }
+  .abl { display: flex; flex-direction: column; gap: 8px; }
+  .ab { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; align-items: center;
+    padding: 9px 11px; background: #1a1a1a; border: 1px solid var(--line-soft); border-radius: 6px; }
+  .abn { grid-column: 1; font-size: 12px; color: var(--text); font-weight: 500; }
+  .abd { grid-column: 1; font-family: var(--mono); font-size: 10px; color: var(--text3); margin-top: 2px; }
+  .abr { grid-column: 2; grid-row: 1 / 3; font-family: var(--mono); font-size: 12px;
+    font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .abr.ok { color: var(--ok); }
+  .abr.bad { color: var(--danger); }
+  .abnote { font-size: 11px; color: var(--text3); margin-top: 10px; line-height: 1.45; }
 
   .ftr { display: flex; justify-content: space-between; align-items: center;
     padding: 10px 22px; border-top: 1px solid var(--line); font-family: var(--mono);
@@ -147,7 +157,7 @@ STYLE = """
 """
 
 
-def body(data: dict) -> str:
+def body(data: dict, abl=None) -> str:
     steps = "".join(
         f'<div class="step"><span class="n">{i:02d}</span>'
         f'<span class="act">{d["act"]}</span><span class="to">{d["to"]}</span></div>'
@@ -158,6 +168,21 @@ def body(data: dict) -> str:
     samp = s.get("samples", "—")
     distm = s.get("distance_m", "—")
     batt = s.get("battery_used_pct", "—")
+    abl_html = ""
+    if abl:
+        maxrisk = max((r["risk"] for r in abl["rows"] if r.get("risk") is not None), default=0)
+        cards = "".join(
+            f'<div class="ab"><div class="abn">{r["config"]}</div>'
+            f'<div class="abd">{r["chosen"]} &middot; sci {r["science"]:.2f}</div>'
+            f'<div class="abr {"ok" if r.get("safe") else "bad"}">'
+            + ((f'risk {r["risk"] * 100:.0f}%') if r.get("risk") is not None else "&mdash;")
+            + '</div></div>'
+            for r in abl["rows"])
+        abl_html = (f'<section><h2>Ablation &mdash; do the parts earn it?</h2>'
+                    f'<div class="abl">{cards}</div>'
+                    f'<div class="abnote">The verify step caps tail-risk at the '
+                    f'{abl["risk_ceiling"] * 100:.0f}% ceiling &mdash; without it, chasing science '
+                    f'value hits {maxrisk * 100:.0f}%.</div></section>')
     return f"""
 <div class="hdr">
   <div class="desig"><span class="mark"></span><span class="name">MARVIN</span>
@@ -186,6 +211,7 @@ def body(data: dict) -> str:
         <div class="r"><span class="k">Ground-ops eqv.</span><span class="v"><b>~{dec} sols</b> vs 1 cycle</span></div>
       </div>
     </section>
+    {abl_html}
     <section>
       <h2>Decision log</h2>
       <div class="log">{steps}</div>
@@ -199,6 +225,8 @@ def body(data: dict) -> str:
 
 def build():
     data = export_data()
+    abl = (json.load(open("data/derived/ablation.json", encoding="utf-8"))
+           if os.path.exists("data/derived/ablation.json") else None)
     libs = vendor()
     fonts = font_faces()
     scene = open("web/scene.js", encoding="utf-8").read()
@@ -210,12 +238,12 @@ def build():
         f"<script>{scene}</script>"
     )
     inner = (f"<title>MARVIN — Autonomous Mars Mission Planner</title>\n"
-             f"<style>{fonts}\n{STYLE}</style>\n{body(data)}\n{scripts}")
+             f"<style>{fonts}\n{STYLE}</style>\n{body(data, abl)}\n{scripts}")
 
     full = ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             "<title>MARVIN — Autonomous Mars Mission Planner</title>"
-            f"<style>{fonts}\n{STYLE}</style></head><body>{body(data)}{scripts}</body></html>")
+            f"<style>{fonts}\n{STYLE}</style></head><body>{body(data, abl)}{scripts}</body></html>")
 
     os.makedirs("web", exist_ok=True)
     open("web/showcase.html", "w", encoding="utf-8").write(full)

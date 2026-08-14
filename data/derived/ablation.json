@@ -1,0 +1,52 @@
+{
+  "risk_ceiling": 0.1,
+  "targets": [
+    {
+      "id": "basin_A",
+      "risk": 0.004,
+      "p_success": 1.0,
+      "science": 0.5
+    },
+    {
+      "id": "basin_B",
+      "risk": 0.02,
+      "p_success": 1.0,
+      "science": 0.6
+    },
+    {
+      "id": "rim_C",
+      "risk": 0.235,
+      "p_success": 1.0,
+      "science": 0.9
+    }
+  ],
+  "rows": [
+    {
+      "config": "No planner",
+      "rule": "nearest target",
+      "chosen": "basin_A",
+      "risk": 0.004,
+      "p_success": 1.0,
+      "science": 0.5,
+      "safe": true
+    },
+    {
+      "config": "Planner, no fast-sim",
+      "rule": "highest science, unchecked",
+      "chosen": "rim_C",
+      "risk": 0.235,
+      "p_success": 1.0,
+      "science": 0.9,
+      "safe": false
+    },
+    {
+      "config": "Planner + fast-sim",
+      "rule": "highest science within risk ceiling",
+      "chosen": "basin_B",
+      "risk": 0.02,
+      "p_success": 1.0,
+      "science": 0.6,
+      "safe": true
+    }
+  ]
+}
