@@ -40,3 +40,6 @@ demo/out/
 
 # showcase vendored libs (downloaded, inlined into showcase.html)
 web/vendor/
+
+# large 3D mesh source/derived assets (converted on demand)
+world/assets/
