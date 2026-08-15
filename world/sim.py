@@ -21,6 +21,14 @@ MARS_GRAVITY = 3.72          # m/s^2
 TERRAIN_RADIUS = 5.0         # world spans [-5, 5] m in x and y
 WHEEL_RADIUS = 0.06
 
+# Optional photoreal skin: NASA's public-domain Perseverance model as a *visual-only* mesh on the
+# chassis (no collisions; physics stays the fast skid-steer box). Used for rendering/video only.
+import os as _os
+ROVER_MESH_PATH = _os.path.join(_os.path.dirname(__file__), "assets", "perseverance.obj")
+ROVER_MESH_SCALE = 0.257     # ~0.8 m long, matched to the chassis footprint
+ROVER_MESH_YAW = 90          # mesh length axis is Y; +90deg aligns its front with chassis +X
+ROVER_MESH_Z = -0.10         # drop so the model's wheels meet the terrain contact plane
+
 
 @dataclass
 class SampleTarget:
@@ -31,9 +39,24 @@ class SampleTarget:
     mineral_class: str = "unknown"
 
 
-def _rover_xml(hf: dict, targets: list[SampleTarget]) -> str:
-    """Build the MJCF for terrain + skid-steer rover + camera + sample targets."""
+def _rover_xml(hf: dict, targets: list[SampleTarget], render_mesh: bool = False) -> str:
+    """Build the MJCF for terrain + skid-steer rover + camera + sample targets.
+
+    render_mesh=True drapes the NASA Perseverance visual mesh over the chassis and hides the
+    physics box + wheels (alpha 0). Physics is identical either way; the mesh is cosmetic.
+    """
     start_z = hf["elevation_m"] + 0.35
+    use_mesh = render_mesh and _os.path.exists(ROVER_MESH_PATH)
+    box_alpha = 0.0 if use_mesh else 1.0
+    wheel_alpha = 0.0 if use_mesh else 1.0
+    compiler = f'<compiler meshdir="{_os.path.dirname(ROVER_MESH_PATH)}"/>' if use_mesh else ""
+    visual = '<visual><global offwidth="1280" offheight="960"/></visual>' if use_mesh else ""
+    mesh_asset = (f'<mesh name="rover_mesh" file="{_os.path.basename(ROVER_MESH_PATH)}" '
+                  f'scale="{ROVER_MESH_SCALE} {ROVER_MESH_SCALE} {ROVER_MESH_SCALE}"/>') if use_mesh else ""
+    # mass="0": visual-only skin must add no mass/inertia (else default density pins the chassis).
+    mesh_geom = (f'<geom type="mesh" mesh="rover_mesh" contype="0" conaffinity="0" group="1" '
+                 f'mass="0" pos="0 0 {ROVER_MESH_Z}" euler="0 0 {ROVER_MESH_YAW}" '
+                 f'rgba="0.82 0.80 0.78 1"/>') if use_mesh else ""
     target_bodies = "\n".join(
         f'''
         <body name="{t.id}" pos="{t.xy[0]:.3f} {t.xy[1]:.3f} {start_z + 0.5:.3f}">
@@ -49,7 +72,7 @@ def _rover_xml(hf: dict, targets: list[SampleTarget]) -> str:
         <body name="wheel_{name}" pos="{sx} {sy} -0.04">
           <joint name="wheel_{name}" type="hinge" axis="0 1 0" armature="0.01" damping="0.05"/>
           <geom type="cylinder" fromto="0 -0.03 0 0 0.03 0" size="{WHEEL_RADIUS}"
-                rgba="0.2 0.2 0.22 1" friction="1.5 0.02 0.001" mass="0.3"
+                rgba="0.2 0.2 0.22 {wheel_alpha}" friction="1.5 0.02 0.001" mass="0.3"
                 condim="4" margin="0.001"/>
         </body>'''
     actuators = "\n".join(
@@ -58,9 +81,12 @@ def _rover_xml(hf: dict, targets: list[SampleTarget]) -> str:
     )
     return f'''<mujoco model="marsim">
   <option timestep="0.004" gravity="0 0 -{MARS_GRAVITY}" integrator="implicitfast" iterations="50"/>
+  {compiler}
+  {visual}
   <asset>
     <hfield name="terrain" nrow="{hf['nrow']}" ncol="{hf['ncol']}"
             size="{TERRAIN_RADIUS} {TERRAIN_RADIUS} {max(hf['elevation_m'], 0.05):.3f} 0.5"/>
+    {mesh_asset}
   </asset>
   <worldbody>
     <light pos="0 0 6" dir="0 0 -1" diffuse="0.9 0.85 0.8"/>
@@ -68,7 +94,8 @@ def _rover_xml(hf: dict, targets: list[SampleTarget]) -> str:
           rgba="0.72 0.42 0.28 1" friction="1.2 0.02 0.001"/>
     <body name="chassis" pos="0 0 {start_z:.3f}">
       <freejoint/>
-      <geom type="box" size="0.22 0.16 0.05" rgba="0.8 0.8 0.85 1" mass="3.0"/>
+      <geom type="box" size="0.22 0.16 0.05" rgba="0.8 0.8 0.85 {box_alpha}" mass="3.0"/>
+      {mesh_geom}
       <camera name="rover_cam" pos="0.24 0 0.10" xyaxes="1 0 0 0 -1 1" fovy="58"/>
       {wheels}
     </body>
@@ -85,7 +112,7 @@ class MarsSim:
 
     def __init__(self, terrain: np.ndarray | None = None, seed: int = 42,
                  targets: list[tuple[str, float, float]] | None = None,
-                 dem_path: str | None = None) -> None:
+                 dem_path: str | None = None, render_mesh: bool = False) -> None:
         # Default to the real Jezero MOLA DEM if it's been fetched (data.fetch_jezero); else synthetic.
         import os as _os
         _default_dem = "data/derived/jezero_dem.npy"
@@ -118,7 +145,7 @@ class MarsSim:
             for t in targets
         ]
 
-        self.model = mujoco.MjModel.from_xml_string(_rover_xml(self.hf, self.targets))
+        self.model = mujoco.MjModel.from_xml_string(_rover_xml(self.hf, self.targets, render_mesh))
         self.model.hfield_data[:] = self.hf["data"].ravel().astype(np.float32)
         self.data = mujoco.MjData(self.model)
         mujoco.mj_forward(self.model, self.data)
