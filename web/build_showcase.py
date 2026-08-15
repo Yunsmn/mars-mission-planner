@@ -161,40 +161,61 @@ STYLE = """
     padding: 10px 22px; border-top: 1px solid var(--line); font-family: var(--mono);
     font-size: 11px; color: var(--text3); letter-spacing: 0.02em; }
   .ftr b { color: var(--blue); font-weight: 500; }
+
+  .sit .lead { font-size: 12.5px; color: var(--text2); line-height: 1.5; }
+  .bigstat { display: flex; align-items: baseline; gap: 11px; margin-top: 13px; }
+  .bigstat .num { font-size: 42px; font-weight: 600; color: var(--danger); line-height: 1;
+    font-variant-numeric: tabular-nums; }
+  .bigstat .arrow { color: var(--text3); font-size: 20px; }
+  .bigstat .num.zero { color: var(--ok); }
+  .bigstat .lbl { font-family: var(--mono); font-size: 10px; color: var(--text3);
+    text-transform: uppercase; letter-spacing: 0.07em; line-height: 1.35; }
+  .route { display: flex; flex-direction: column; }
+  .rt { display: grid; grid-template-columns: 1fr auto 92px; gap: 10px; align-items: baseline;
+    font-family: var(--mono); font-size: 11.5px; padding: 7px 8px; border-bottom: 1px solid var(--line-soft);
+    border-left: 2px solid transparent; }
+  .rt:last-child { border-bottom: 0; }
+  .rt .rn { color: var(--text2); }
+  .rt .rk { font-variant-numeric: tabular-nums; text-align: right; }
+  .rt .rs { font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; text-align: right; }
+  .rt.safe .rk, .rt.safe .rs { color: var(--ok); }
+  .rt.stuck .rk, .rt.stuck .rs { color: var(--danger); }
+  .rt.chosen { background: #1a1a1a; border-left-color: var(--blue); }
+  .decide { margin-top: 12px; font-size: 11.5px; line-height: 1.5; color: var(--text2); }
+  .decide .by { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--text3); display: block; margin-bottom: 4px; }
+  .decide b { color: var(--blue); font-weight: 600; }
 """
 
 
-def body(data: dict, abl=None, video: str = "") -> str:
-    steps = "".join(
-        f'<div class="step"><span class="n">{i:02d}</span>'
-        f'<span class="act">{d["act"]}</span><span class="to">{d["to"]}</span></div>'
-        for i, d in enumerate(data["decisions"], 1)
-    )
-    s = data.get("stats") or {}
-    dec = s.get("decisions", len(data["decisions"]))
-    samp = s.get("samples", "—")
-    distm = s.get("distance_m", "—")
-    batt = s.get("battery_used_pct", "—")
-    abl_html = ""
-    if abl:
-        maxrisk = max((r["risk"] for r in abl["rows"] if r.get("risk") is not None), default=0)
-        cards = "".join(
-            f'<div class="ab"><div class="abn">{r["config"]}</div>'
-            f'<div class="abd">{r["chosen"]} &middot; sci {r["science"]:.2f}</div>'
-            f'<div class="abr {"ok" if r.get("safe") else "bad"}">'
-            + ((f'risk {r["risk"] * 100:.0f}%') if r.get("risk") is not None else "&mdash;")
-            + '</div></div>'
-            for r in abl["rows"])
-        abl_html = (f'<section><h2>Ablation &mdash; do the parts earn it?</h2>'
-                    f'<div class="abl">{cards}</div>'
-                    f'<div class="abnote">The verify step caps tail-risk at the '
-                    f'{abl["risk_ceiling"] * 100:.0f}% ceiling &mdash; without it, chasing science '
-                    f'value hits {maxrisk * 100:.0f}%.</div></section>')
+def _route_rows(record: dict) -> str:
+    rows = ""
+    for r in record.get("assessed_routes", []):
+        safe = r.get("safe")
+        chosen = " chosen" if r["name"] == record.get("chosen_route") else ""
+        rows += (f'<div class="rt {"safe" if safe else "stuck"}{chosen}">'
+                 f'<span class="rn">{r["name"]}</span>'
+                 f'<span class="rk">{r["tail_risk"] * 100:.0f}%</span>'
+                 f'<span class="rs">{"safe" if safe else "would stick"}</span></div>')
+    return rows
+
+
+def body(record: dict, video: str = "") -> str:
+    sols = record.get("real_stuck_sols", 38)
+    reached = "yes" if record.get("reached") else "no"
+    sampled = "yes" if record.get("sampled") else "no"
+    distm = record.get("distance_m", "—")
+    batt = record.get("battery_used_pct", "—")
+    chosen = record.get("chosen_route", "—")
+    by = record.get("decided_by", "granite")
+    by_label = "IBM Granite" if by == "granite" else "safety gate"
+    rationale = record.get("rationale", "")
+    samp_badge = "outcrop sampled" if record.get("sampled") else "outcrop pending"
     return f"""
 <div class="hdr">
   <div class="desig"><span class="mark"></span><span class="name">MARVIN</span>
     <span class="full">Autonomous Mars Mission Planner</span></div>
-  <div class="coords"><span class="k">JEZERO &middot; MOLA DEM &middot;</span> {JEZERO_COORDS}</div>
+  <div class="coords"><span class="k">PURGATORY DUNE &middot; Opportunity sol 446 &middot;</span> Meridiani Planum</div>
 </div>
 <div class="main">
   <div class="viewport">
@@ -203,27 +224,37 @@ def body(data: dict, abl=None, video: str = "") -> str:
     </video>
     <span class="tick tl"></span><span class="tick tr"></span>
     <span class="tick bl"></span><span class="tick br"></span>
-    <div class="vp-status">{samp} / 2 samples cached</div>
-    <div class="vp-note">real MuJoCo simulation &middot; real Jezero MOLA terrain</div>
+    <div class="vp-status">{samp_badge}</div>
+    <div class="vp-note">real MuJoCo physics &middot; NASA Perseverance mesh &middot; Meridiani-class dune</div>
     <div class="vp-hint">recorded mission playback</div>
   </div>
   <aside class="rail">
+    <section class="sit">
+      <h2>Situation</h2>
+      <div class="lead">On sol 446 (Apr 2005) NASA's Opportunity drove straight into a wind-shaped
+        ripple, dug its wheels in, and got stuck. Freeing it took weeks of Earth-side testing.
+        Spirit hit the same soft-soil trap in 2009 and never escaped.</div>
+      <div class="bigstat"><span class="num">{sols}</span><span class="arrow">&rarr;</span>
+        <span class="num zero">0</span>
+        <span class="lbl">sols lost<br>real Opportunity vs MARVIN</span></div>
+    </section>
+    <section>
+      <h2>Route assessment &mdash; lightsim, 20 rollouts each</h2>
+      <div class="route">{_route_rows(record)}</div>
+      <div class="decide"><span class="by">Decision &middot; {by_label}</span>{rationale}</div>
+    </section>
     <section>
       <h2>Telemetry</h2>
       <div class="tel">
-        <div class="r"><span class="k">Site</span><span class="v">Jezero &middot; MOLA DEM</span></div>
         <div class="r"><span class="k">Planner</span><span class="v"><b>IBM Granite 4.1</b></span></div>
-        <div class="r"><span class="k">Decisions</span><span class="v"><b>{dec}</b> &middot; 0 ground</span></div>
-        <div class="r"><span class="k">Samples</span><span class="v">{samp} / 2 cached</span></div>
+        <div class="r"><span class="k">Decided by</span><span class="v">{by_label} &middot; lightsim-verified</span></div>
+        <div class="r"><span class="k">Route</span><span class="v"><b>{chosen}</b></span></div>
+        <div class="r"><span class="k">Reached outcrop</span><span class="v">{reached}</span></div>
+        <div class="r"><span class="k">Sample cached</span><span class="v">{sampled}</span></div>
         <div class="r"><span class="k">Traverse</span><span class="v">{distm} m</span></div>
         <div class="r"><span class="k">Battery used</span><span class="v">{batt} %</span></div>
-        <div class="r"><span class="k">Ground-ops eqv.</span><span class="v"><b>~{dec} sols</b> vs 1 cycle</span></div>
+        <div class="r"><span class="k">Sols lost</span><span class="v"><b>0</b> vs {sols} real</span></div>
       </div>
-    </section>
-    {abl_html}
-    <section>
-      <h2>Decision log</h2>
-      <div class="log">{steps}</div>
     </section>
   </aside>
 </div>
@@ -233,26 +264,26 @@ def body(data: dict, abl=None, video: str = "") -> str:
 
 
 def build():
-    data = export_data()
-    abl = (json.load(open("data/derived/ablation.json", encoding="utf-8"))
-           if os.path.exists("data/derived/ablation.json") else None)
+    record = json.load(open("data/derived/purgatory_record.json", encoding="utf-8"))
     fonts = font_faces()
-    video = _video_uri()
+    video = _video_uri("web/vendor/purgatory.mp4")
+    page = body(record, video)
 
     inner = (f"<title>MARVIN — Autonomous Mars Mission Planner</title>\n"
-             f"<style>{fonts}\n{STYLE}</style>\n{body(data, abl, video)}")
+             f"<style>{fonts}\n{STYLE}</style>\n{page}")
 
     full = ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             "<title>MARVIN — Autonomous Mars Mission Planner</title>"
-            f"<style>{fonts}\n{STYLE}</style></head><body>{body(data, abl, video)}</body></html>")
+            f"<style>{fonts}\n{STYLE}</style></head><body>{page}</body></html>")
 
     os.makedirs("web", exist_ok=True)
     open("web/showcase.html", "w", encoding="utf-8").write(full)
     open("web/showcase_artifact.html", "w", encoding="utf-8").write(inner)
     print(f"wrote web/showcase.html ({len(full)//1024} KB) and web/showcase_artifact.html")
-    print(f"  terrain {data['grid']}x{data['grid']} · path {len(data['trajectory'])} pts · "
-          f"{len(data['targets'])} targets · {len(data['decisions'])} decisions")
+    print(f"  event={record['chosen_route']} by {record['decided_by']} · "
+          f"reached={record.get('reached')} sampled={record.get('sampled')} · "
+          f"{len(record.get('assessed_routes', []))} routes assessed")
 
 
 def vendor() -> dict:
