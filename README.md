@@ -57,11 +57,15 @@ a safety gate guarantees the pick is never a predicted trap:
 The rover then drives the detour on full MuJoCo physics and samples the outcrop beyond the dune —
 **reached ✅, sample cached ✅, 0 sols lost** against Opportunity's 38.
 
-![MARVIN routing the NASA Perseverance rover around the Purgatory Dune](docs/figures/purgatory_rover.png)
+![Split-screen: the Earth-planned direct route stalls in the dune; MARVIN routes around and samples](docs/figures/compare.png)
 
-*Real MuJoCo physics, NASA's public-domain Perseverance mesh, on a Meridiani-class dune. Reproduce
-it: `python -m demo.purgatory` (headless) or `python -m web.render_purgatory` (video), or drive it
-yourself in the CLI with `dune` then `route`.*
+*Same dune, same camera, real MuJoCo physics both sides: the orbital plan (left) drives in and
+stalls; MARVIN (right) takes Granite's verified detour and caches the sample. Render it with
+`python -m web.render_compare`.*
+
+*Reproduce the run: `python -m demo.purgatory` (headless), `python -m web.render_purgatory` (the
+hero rover clip with NASA's public-domain Perseverance mesh), or drive it yourself in the CLI with
+`dune` then `route`.*
 
 ## Results
 
@@ -116,6 +120,16 @@ relief **−2781 to −1543 m over 60 km**, amplitude-normalized to the rover-sc
 patch is abstracted; the *morphology* is real). Per-target **science value** comes from
 CRISM-style mineralogy (carbonate/clay high — see the [scenario](demo/scenario.py)), and **dust
 opacity** drives the solar-power budget. Details in [`docs/DATA.md`](docs/DATA.md).
+
+**The real-time path.** MARVIN consumes these NASA archives *through the same interfaces a flight
+build would use for live data* — the archive is a stand-in for a real-time feed we don't have access
+to. On an actual rover, the identical `perceive → propose → verify → gate` loop takes onboard
+telemetry (hazard cameras, IMU/odometry, power) in place of the archived DEM and mineral maps;
+nothing in the architecture assumes the data is static. That's the point of keeping it **offline and
+serverless**: MARVIN is designed to drop in as an onboard decision module — between the sensors the
+rover already has and the drive system it already trusts — not as a ground tool that phones home.
+watsonx and other cloud AI live on Earth, unreachable across the light-time gap; MARVIN deliberately
+runs its reasoning on **Granite, onboard**.
 
 ## How IBM Bob was used
 

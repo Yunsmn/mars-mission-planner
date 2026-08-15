@@ -1,87 +1,111 @@
-# MARVIN — 3-minute demo video script
+# MARVIN — 3-minute demo video (cinematic cut)
 
-**Target: 2:55 (hard cap 3:00).** One continuous story: a real rover got stuck → why → MARVIN
-reruns that moment onboard → it works → why it's trustworthy → what it could become.
-Record narration (VO) over screen-capture + the rendered clips. Everything on screen is real and
-reproducible from this repo.
+**Target 2:55, hard cap 3:00.** One story, cut fast, scored like a mission film. Everything on
+screen is real and reproducible from this repo. You record VO + the CLI capture; the rendered clips
+are already in `web/vendor/`.
 
-**Assets to have open/ready:** `web/vendor/purgatory.mp4` (the rover clip), the showcase page
-(`web/showcase.html`), a terminal in the venv, `docs/figures/purgatory_rover.png`.
+**Tone:** restrained, high-stakes, a little cinematic — think mission control, not a startup sizzle
+reel. Low ambient pad under the whole thing; a single music swell at the reveal (~0:58) and again at
+the split-screen (~1:40). Cut, don't fade. Let the visuals breathe; don't over-narrate.
+
+**Clips ready to drop in:**
+- `web/vendor/purgatory.mp4` — hero rover clip (Perseverance mesh rounding the dune, chase-cam).
+- `web/vendor/compare.mp4` — the split-screen proof (stuck vs routed).
+- `docs/figures/purgatory_rover.png` — hero still for the title card.
+- Live screen-capture of `demo.cli` for the control beat.
 
 ---
 
-### 0:00 – 0:18 · Hook — the stranded rover
-**On screen:** slow push on a real NASA image of Opportunity / the Purgatory ripple (or open on
-`purgatory_rover.png`, held still), a stark date card: **SOL 446 · 26 APR 2005**.
-**VO:**
-> "In 2005, NASA's Opportunity rover drove into a wind-blown ripple of soft sand and sank its
-> wheels. Getting it out took **38 sols** — five weeks. Four years later, Spirit hit the same kind
-> of trap and never got out. The rovers never saw it coming."
+### 0:00 – 0:16 · COLD OPEN — the true story
+**Visual:** black. A single line types on: **`SOL 446 · MERIDIANI PLANUM · 2005`**. Cut to a real
+NASA image of Opportunity / the Purgatory ripple (or hold on `purgatory_rover.png`, desaturated).
+**VO (quiet):**
+> "In 2005, a rover named Opportunity drove into a ripple of soft sand and sank. Digging it out
+> took thirty-eight days. Four years later, Spirit hit the same kind of trap — and never moved
+> again."
+**Text card:** *38 sols lost. The decision to drive in was made on Earth, days earlier.*
 
-### 0:18 – 0:38 · The problem — the decision was made on Earth
-**On screen:** simple diagram — rover → 4-24 min light-delay → Earth → command uplink → back.
+### 0:16 – 0:36 · THE GAP
+**Visual:** clean motion graphic — rover → dashed line → **4–24 min** → Earth → command → back.
+The loop pulses slowly, deliberately sluggish.
 **VO:**
-> "That's because a Mars rover doesn't decide for itself. It sends data to Earth, waits through a
-> comms window, and human planners send back one command sequence — about one per day. The choice
-> to drive into that dune was made on Earth, from orbit, days ahead of time. No second look."
+> "A Mars rover can't decide for itself. It ships data to Earth, waits out a comms window, and
+> gets back one command sequence a day. Between windows, it's blind. It does exactly what it was
+> told — even when what it was told is *drive into the dune*."
 
-### 0:38 – 0:58 · Enter MARVIN — the thesis
-**On screen:** title **MARVIN**, one line: *the model proposes, the physics-lite simulator
-disposes.* Show the propose → verify → gate loop as three chips.
+### 0:36 – 0:58 · THE IDEA — MARVIN
+**Visual:** title **MARVIN** — *Mars Autonomous Reasoning & Verification INtelligence*. One line
+under it: **the model proposes · the physics-lite sim disposes.** Three chips light in sequence:
+**PROPOSE → VERIFY → GATE**.
 **VO:**
-> "MARVIN moves that decision onboard. A small **IBM Granite** model *proposes* what to do — but it
-> never commands the rover directly. A fast physics-lite simulator we call the **lightsim** *verifies*
-> every proposal against uncertainty first. Propose, then verify. Let me show you on the exact
-> moment that stranded Opportunity."
+> "MARVIN puts the decision back on the rover. A small IBM Granite model *proposes* what to do —
+> but it never touches the wheels. A fast physics simulator we call the lightsim *verifies* every
+> idea against uncertainty first, and a safety gate throws out anything that looks like a trap.
+> Here's that exact 2005 moment, rerun onboard."
+*(music swell)*
 
-### 0:58 – 1:52 · The Purgatory run — the core (screen-capture the CLI)
-**On screen:** terminal. Type it live:
+### 0:58 – 1:38 · YOU'RE IN CONTROL — the CLI (live screen-capture)
+**Visual:** terminal, big readable font. Type it live; let the output print.
 ```
-python -m demo.cli
-marvin> dune          # the ASCII map shows the dune wall ^ between rover @ and outcrop *
+$ python -m demo.cli
+marvin> dune          # ASCII map: the dune wall ^ sits between rover @ and outcrop *
 marvin> route
 ```
-Let the output play; cut to `purgatory.mp4` for the drive.
-**VO (over the CLI output):**
-> "Here's the trap — a dune between the rover and the outcrop it needs to sample. Watch the lightsim
-> roll each route out twenty times under uncertainty. The direct path — the orbital plan — comes back
-> at **100 percent** entrapment risk. So does the north detour. Only the **south detour** is safe, at
-> **9 percent**. Granite reads those numbers and commits:"
-**On screen highlight the line:** *DECISION (GRANITE): detour south — the only safe route under 10%.*
-**VO (cut to the rover clip):**
-> "And a safety gate guarantees it can never pick a route the lightsim flagged as a trap. Now it
-> drives — real MuJoCo physics, NASA's actual Perseverance model — around the dune, and caches the
-> sample. Reached. Sampled. **Zero sols lost**, against Opportunity's thirty-eight."
+Let the assessment print, then **freeze-frame + zoom** on these three lines:
+```
+direct         entrapment risk 100%   WOULD GET STUCK
+detour north   entrapment risk 100%   WOULD GET STUCK
+detour south   entrapment risk   9%   SAFE
+DECISION (GRANITE): detour south — the only safe route under 10%.
+```
+**VO (over the CLI):**
+> "This isn't a canned animation — it's the tool a mission operator would actually drive. Load the
+> trap, and ask MARVIN to plan. The lightsim rolls each route out twenty times. The direct path —
+> the orbital plan — comes back at a hundred percent risk. So does the north detour. Only the south
+> detour is safe. Granite reads the numbers and commits — and the gate guarantees it can never pick
+> a route the sim flagged. You can also drive it yourself, or hand Granite the whole mission."
 
-### 1:52 – 2:18 · Why you can trust a small model
-**On screen:** the showcase page — Situation panel (38 → 0), the route table, telemetry.
+### 1:38 – 2:06 · THE PROOF — split-screen (drop in `compare.mp4`)
+**Visual:** full-frame `compare.mp4`. Same dune, same camera. Left augers in and stalls; right arcs
+around and the sample box vanishes. Let the **STUCK AT DUNE** / **SAMPLE CACHED** labels land.
+*(music swell)*
 **VO:**
-> "The trick is that the model never acts on trust. Two simulators, never confused: MuJoCo is the
-> real world; the lightsim is the rover's cheap imagination, and its risk numbers are calibrated
-> against that real world to within about three percent. Every plan is gated on **worst-case**
-> risk, not the average — and if the model ever picks something unsafe, the gate overrides it. It
-> runs on real Jezero terrain from NASA's MOLA elevation data, fully **offline** — no server, no
-> network, nothing you can't run on a spacecraft."
+> "Same dune. Same rover. On the left, the plan from orbit — into the sand, wheels buried, exactly
+> like Opportunity. On the right, MARVIN's verified route — around the dune, sample cached.
+> Thirty-eight sols lost… versus zero."
 
-### 2:18 – 2:42 · What it could become + IBM Bob
-**On screen:** quick montage — the decision log, `git log --author="IBM Bob"`, the architecture chips.
+### 2:06 – 2:30 · REAL DATA, REAL ROVER
+**Visual:** Jezero MOLA terrain figure; then a simple block diagram — **flight sensors → MARVIN
+(propose · verify · gate) → drive system** — drawn as a drop-in module beside the existing autonomy
+stack.
 **VO:**
-> "Nothing here is specific to one dune. It's a reusable **onboard decision layer** — give it any
-> rover, any terrain, any hazard, and it proposes, verifies, and justifies every move. The reasoning
-> stack — the propose-verify loop, the surrogate, the risk gating — was built with **IBM Bob**, and
-> it runs on **IBM Granite 4.1**."
+> "The terrain is real — NASA's MOLA elevation data for Jezero Crater, pulled from public archives.
+> Today those archives stand in for a live feed; on a real rover, the same interfaces take real-time
+> telemetry instead. MARVIN is built to slot in as an onboard module — between the sensors the rover
+> already has and the drive system it already trusts. Two simulators, never confused: the real
+> physics, and the rover's cheap imagination, calibrated to it within about three percent."
 
-### 2:42 – 2:55 · Close
-**On screen:** MARVIN mark, repo URL, "Onboard · Offline · Verified."
+### 2:30 – 2:44 · WHY IT'S DIFFERENT + IBM
+**Visual:** quick montage — decision log scrolling, `git log --author="IBM Bob"`, "Onboard ·
+Offline · Verified."
 **VO:**
-> "Opportunity waited five weeks for Earth to dig it out. MARVIN decides in seconds, onboard, and
-> never drives in. That's the difference between data-heavy and insight-driven. MARVIN."
+> "It runs fully offline — no server, nothing you couldn't fly. watsonx lives on Earth; the whole
+> point is Granite reasoning *onboard*. The reasoning stack was built with IBM Bob, on IBM Granite
+> 4.1. And nothing here is specific to one dune — it's a reusable decision layer for any rover, any
+> hazard."
+
+### 2:44 – 2:55 · CLOSE
+**Visual:** the MARVIN mark, repo URL, final line: *Opportunity waited five weeks. MARVIN decides
+in seconds.*
+**VO:**
+> "Opportunity waited five weeks for Earth to dig it out. MARVIN decides in seconds — onboard — and
+> never drives in. Data-heavy, made insight-driven. MARVIN."
 
 ---
 
-**Recording tips**
-- Do the CLI segment in one clean take; if Granite's call is slow, pre-warm it (`route` once before
-  recording) so the on-camera run is snappy — the decision is deterministic (seeded).
-- Keep VO under the cap; 2:55 leaves headroom. Trust the visuals during the drive — don't over-talk.
-- Captions on the risk numbers (100% / 100% / 9%) and the DECISION line land the point without VO.
-- Cut, don't fade — judges watch fast.
+**Recording notes**
+- Pre-warm Granite (`route` once) before the live take so the on-camera call is instant — the
+  decision is seeded and deterministic, so it'll say the same thing.
+- Captions on the risk numbers (100 / 100 / 9) and the DECISION line carry the point even on mute.
+- The split-screen is your strongest 10 seconds — don't rush it; let the labels read.
+- Keep total VO under the cap; 2:55 leaves headroom for the cold-open silence.
