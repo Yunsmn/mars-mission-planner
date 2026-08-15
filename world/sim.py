@@ -159,6 +159,17 @@ class MarsSim:
         self._settle(400)
         self.trajectory: list[tuple[float, float]] = []   # (x, y) path, for visualization
 
+    def reset(self) -> None:
+        """Restore the initial state on the *same* model (so a live viewer can keep its window)."""
+        mujoco.mj_resetData(self.model, self.data)
+        mujoco.mj_forward(self.model, self.data)
+        for t in self.targets:
+            t.collected = False
+        self.battery_pct = 100.0
+        self.sol_time = 0.0
+        self._settle(400)
+        self.trajectory = []
+
     # ---- physics -----------------------------------------------------------------
     def _settle(self, n: int) -> None:
         for _ in range(n):
