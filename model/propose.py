@@ -65,6 +65,39 @@ class Proposer:
             # Return safe fallback: HOLD action
             return [self._safe_hold()]
     
+    def choose_route(self, assessed: list, goal, cfg: dict):
+        """Decide which route to take, given the lightsim's entrapment-risk assessment of each.
+        Returns (route_name, reason). The caller gates the choice for safety."""
+        ceiling = int(cfg.get("risk_ceiling", 0.10) * 100)
+        lines = "\n".join(
+            f"- {r['name']}: predicted entrapment risk {r['tail_risk'] * 100:.0f}%, "
+            f"length {r['length_m']} m -- {'SAFE' if r['safe'] else 'WOULD GET STUCK'}"
+            for r in assessed)
+        prompt = (
+            f"You are the onboard planner for a Mars rover. Reach the goal at "
+            f"({goal[0]:.1f}, {goal[1]:.1f}).\n"
+            f"A fast onboard simulator rolled out each candidate route under uncertainty and "
+            f"predicted its entrapment risk (chance the rover bogs down in soft dune sand and gets "
+            f"stuck):\n\n{lines}\n\n"
+            f"Rules:\n- NEVER take a route above {ceiling}% entrapment risk -- a stuck rover can be "
+            f"lost for good (this stranded NASA's Spirit rover permanently).\n"
+            f"- Among safe routes, prefer the shorter one.\n\n"
+            f"Reply with ONLY:\nROUTE: <exact route name>\nREASON: <one short sentence>"
+        )
+        resp = self._call_ollama(prompt)
+        name, reason = None, ""
+        for line in resp.splitlines():
+            s = line.strip()
+            if s.upper().startswith("ROUTE:"):
+                name = s.split(":", 1)[1].strip()
+            elif s.upper().startswith("REASON:"):
+                reason = s.split(":", 1)[1].strip()
+        names = [r["name"] for r in assessed]
+        if name not in names:                       # model paraphrased -- fuzzy-match to a real route
+            hay = (name or resp or "").lower()
+            name = next((n for n in names if n in hay), None)
+        return name, (reason or "based on the lightsim's entrapment predictions")
+
     def _build_prompt(self, state: MissionState, perception: Perception, k: int) -> str:
         """Build the prompt for Gemma 4."""
         # Calculate distances to targets and format with distance info
