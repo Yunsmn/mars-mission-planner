@@ -33,6 +33,36 @@ actions between comms windows** — without a heavy world model, without a netwo
 blindly trusting a small model. It doesn't replace navigation or human oversight; it's the
 reasoning layer that decides *what to do next* and delegates execution.
 
+## The moment it matters: the Purgatory Dune
+
+On **sol 446 (26 April 2005)**, NASA's *Opportunity* drove straight into a wind-shaped ripple in
+Meridiani Planum — later nicknamed **"Purgatory Dune"** — buried its wheels past the hubs, and got
+stuck. Freeing it took **38 sols** of careful Earth-side sandbox testing. *Spirit* hit the same
+class of soft-soil trap at "Troy" in 2009 and **never escaped**. The rovers couldn't see the trap
+coming, because the decision to drive in was made on Earth, from orbital imagery, days ahead.
+
+MARVIN reruns that moment onboard. The fast surrogate ("lightsim") rolls each candidate route out
+**20× under uncertainty** and predicts its entrapment risk; **IBM Granite decides** which to take;
+a safety gate guarantees the pick is never a predicted trap:
+
+| Route | Entrapment risk (lightsim) | Verdict |
+|-------|:--------------------------:|---------|
+| direct (the orbital plan) | **100 %** | would get stuck |
+| detour north | **100 %** | would get stuck |
+| **detour south** | **9 %** | ✅ **safe — Granite's choice** |
+
+> **Decision — IBM Granite:** *"chose the detour south: it is the only safe route (under 10 %
+> entrapment risk)."*
+
+The rover then drives the detour on full MuJoCo physics and samples the outcrop beyond the dune —
+**reached ✅, sample cached ✅, 0 sols lost** against Opportunity's 38.
+
+![MARVIN routing the NASA Perseverance rover around the Purgatory Dune](docs/figures/purgatory_rover.png)
+
+*Real MuJoCo physics, NASA's public-domain Perseverance mesh, on a Meridiani-class dune. Reproduce
+it: `python -m demo.purgatory` (headless) or `python -m web.render_purgatory` (video), or drive it
+yourself in the CLI with `dune` then `route`.*
+
 ## Results
 
 - **Completes a full 2-sample mission autonomously** on **IBM Granite 4.1 running locally** —
@@ -114,15 +144,20 @@ uv venv --python 3.12 .venv
 uv pip install --python .venv -r requirements.txt
 ollama pull granite4.1:3b          # IBM Granite 4.1, local & offline
 
+.venv/bin/python -m demo.purgatory  # ⭐ the Purgatory Dune: Granite routes around the trap
 .venv/bin/python -m demo.run        # full autonomous mission (Granite)
-.venv/bin/python -m demo.cli        # interactive: drive the rover yourself, or ask Granite to plan
+.venv/bin/python -m demo.cli        # interactive console — try `dune` then `route` (see below)
 .venv/bin/python -m demo.scenario   # value-aware vs. naive target selection (2.3x science)
 .venv/bin/python -m demo.ablation   # no-planner vs. planner-no-sim vs. full (risk earns its place)
 .venv/bin/python -m demo.compare    # onboard vs. fixed-plan vs. Earth-in-the-loop
-.venv/bin/python -m demo.animate    # render the mission playback (gif + montage)
-.venv/bin/python -m web.build_showcase   # build the interactive 3D showcase page
+.venv/bin/python -m web.render_purgatory # render the Purgatory mission video (Perseverance mesh)
+.venv/bin/python -m web.build_showcase   # build the interactive showcase page
 .venv/bin/python -m pytest          # tests
 ```
+
+**Drive it yourself.** In `demo.cli`, load the trap with `dune`, then `route` — the lightsim scores
+each path, IBM Granite picks the safe detour, and the rover drives it and samples the outcrop. Or
+teleop with `drive <x> <y>` / `sample`, and hand Granite the wheel with `ask` / `step` / `run`.
 
 ## License
 
