@@ -49,10 +49,12 @@ def main():
         return model["m"]
 
     viewer = mujoco.viewer.launch_passive(sim.model, sim.data)
+    cz = float(sim.data.xpos[sim._chassis][2])
     with viewer.lock():
-        viewer.cam.distance, viewer.cam.elevation, viewer.cam.azimuth = 3.4, -22.0, 200.0
+        # start close so the rover fills the frame and reads as a whole rover, not distant specks
+        viewer.cam.distance, viewer.cam.elevation, viewer.cam.azimuth = 1.6, -20.0, 205.0
         x, y, _ = sim.pose()
-        viewer.cam.lookat[:] = [x, y, 0.15]
+        viewer.cam.lookat[:] = [x, y, cz + 0.05]
 
     # animate the physics window as the rover steps, and keep it centred on the rover
     orig_step = sim.step
