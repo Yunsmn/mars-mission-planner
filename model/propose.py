@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 import requests
@@ -65,38 +66,47 @@ class Proposer:
             # Return safe fallback: HOLD action
             return [self._safe_hold()]
     
-    def choose_route(self, assessed: list, goal, cfg: dict):
-        """Decide which route to take, given the lightsim's entrapment-risk assessment of each.
-        Returns (route_name, reason). The caller gates the choice for safety."""
-        ceiling = int(cfg.get("risk_ceiling", 0.10) * 100)
-        lines = "\n".join(
-            f"- {r['name']}: predicted entrapment risk {r['tail_risk'] * 100:.0f}%, "
-            f"length {r['length_m']} m -- {'SAFE' if r['safe'] else 'WOULD GET STUCK'}"
-            for r in assessed)
+    def decide_route(self, start, goal, obstacle, cfg: dict):
+        """Granite makes the routing call: which side to skirt the hazard, and how much clearance.
+        It reasons from the obstacle's geometry (not a scored menu). One call. The caller builds the
+        detour from Granite's decision, the lightsim verifies it, and a gate backs it up.
+        Returns (side, clearance_m, reason, parsed_ok).
+        """
+        if obstacle is None:
+            return None, None, "no obstacle detected", False
+        ox, oy, x0, x1, y0, y1 = obstacle
         prompt = (
-            f"You are the onboard planner for a Mars rover. Reach the goal at "
-            f"({goal[0]:.1f}, {goal[1]:.1f}).\n"
-            f"A fast onboard simulator rolled out each candidate route under uncertainty and "
-            f"predicted its entrapment risk (chance the rover bogs down in soft dune sand and gets "
-            f"stuck):\n\n{lines}\n\n"
-            f"Rules:\n- NEVER take a route above {ceiling}% entrapment risk -- a stuck rover can be "
-            f"lost for good (this stranded NASA's Spirit rover permanently).\n"
-            f"- Among safe routes, prefer the shorter one.\n\n"
-            f"Reply with ONLY:\nROUTE: <exact route name>\nREASON: <one short sentence>"
+            f"You are the onboard navigator of a Mars rover at ({start[0]:.1f}, {start[1]:.1f}). "
+            f"Reach the sample outcrop at ({goal[0]:.1f}, {goal[1]:.1f}).\n"
+            f"A soft-sand dune ridge runs along x≈{ox:.1f}, spanning y {y0:.1f} to {y1:.1f}, and "
+            f"blocks the straight line. Driving onto it can bog the wheels and strand the rover for "
+            f"good — this permanently stranded NASA's Spirit rover.\n\n"
+            f"Decide how to get around it:\n"
+            f"- SIDE: 'south' to pass below the ridge (smaller y) or 'north' to pass above (larger y). "
+            f"The goal is at y={goal[1]:.1f}; pick the side that is the shorter way round.\n"
+            f"- CLEARANCE: how far past the ridge's end to swing, in meters. Use 1.5 to 2.5 — enough "
+            f"to stay well off the soft sand.\n\n"
+            f"Reply with ONLY three lines:\n"
+            f"SIDE: <south|north>\n"
+            f"CLEARANCE: <meters>\n"
+            f"REASON: <one short sentence>"
         )
         resp = self._call_ollama(prompt)
-        name, reason = None, ""
+        side, clearance, reason = None, None, ""
         for line in resp.splitlines():
             s = line.strip()
-            if s.upper().startswith("ROUTE:"):
-                name = s.split(":", 1)[1].strip()
-            elif s.upper().startswith("REASON:"):
+            up = s.upper()
+            if up.startswith("SIDE:"):
+                val = up.split(":", 1)[1]
+                side = "south" if "SOUTH" in val else ("north" if "NORTH" in val else None)
+            elif up.startswith("CLEARANCE:"):
+                nums = re.findall(r"\d+\.?\d*", s.split(":", 1)[1])
+                if nums:
+                    clearance = max(0.5, min(3.0, float(nums[0])))
+            elif up.startswith("REASON:"):
                 reason = s.split(":", 1)[1].strip()
-        names = [r["name"] for r in assessed]
-        if name not in names:                       # model paraphrased -- fuzzy-match to a real route
-            hay = (name or resp or "").lower()
-            name = next((n for n in names if n in hay), None)
-        return name, (reason or "based on the lightsim's entrapment predictions")
+        ok = side in ("south", "north") and clearance is not None
+        return side, clearance, (reason or f"skirting the dune on the {side} side"), ok
 
     def _build_prompt(self, state: MissionState, perception: Perception, k: int) -> str:
         """Build the prompt for Gemma 4."""

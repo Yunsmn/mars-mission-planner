@@ -183,66 +183,49 @@ def rollout_batch(
     )
 
 
-def sample_terrain_along_path(
-    start_positions: np.ndarray,
-    target: np.ndarray,
-    env: SurrogateEnv
-) -> np.ndarray:
-    """Sample terrain slope along paths using bilinear interpolation.
-    
-    Args:
-        start_positions: (n, 2) array of starting positions
-        target: (2,) target position
-        env: SurrogateEnv with terrain grid
-    
-    Returns:
-        (n,) array of slope values in degrees
-    """
-    # Sample at midpoint of path
-    midpoints = (start_positions + target) / 2
-    
-    # Convert world coordinates to grid indices (bilinear interpolation)
-    # Grid spans [-TERRAIN_RADIUS, TERRAIN_RADIUS]
+def _slope_at(points: np.ndarray, env: SurrogateEnv) -> np.ndarray:
+    """Bilinear-interpolated terrain slope (degrees) at world-coordinate points, shape (n,)."""
     grid_size = env.terrain.shape[0]
-    
-    # Normalize to [0, grid_size-1]
-    grid_x = (midpoints[:, 0] + TERRAIN_RADIUS) / (2 * TERRAIN_RADIUS) * (grid_size - 1)
-    grid_y = (midpoints[:, 1] + TERRAIN_RADIUS) / (2 * TERRAIN_RADIUS) * (grid_size - 1)
-    
-    # Clip to valid range
-    grid_x = np.clip(grid_x, 0, grid_size - 1)
-    grid_y = np.clip(grid_y, 0, grid_size - 1)
-    
-    # Bilinear interpolation
+    grid_x = np.clip((points[:, 0] + TERRAIN_RADIUS) / (2 * TERRAIN_RADIUS) * (grid_size - 1),
+                     0, grid_size - 1)
+    grid_y = np.clip((points[:, 1] + TERRAIN_RADIUS) / (2 * TERRAIN_RADIUS) * (grid_size - 1),
+                     0, grid_size - 1)
     x0 = np.floor(grid_x).astype(int)
     x1 = np.minimum(x0 + 1, grid_size - 1)
     y0 = np.floor(grid_y).astype(int)
     y1 = np.minimum(y0 + 1, grid_size - 1)
-    
-    # Fractional parts
-    fx = grid_x - x0
-    fy = grid_y - y0
-    
-    # Get elevation at corners
-    z00 = env.terrain[y0, x0]
-    z01 = env.terrain[y0, x1]
-    z10 = env.terrain[y1, x0]
-    z11 = env.terrain[y1, x1]
-    
-    # Bilinear interpolation
-    z0 = z00 * (1 - fx) + z01 * fx
-    z1 = z10 * (1 - fx) + z11 * fx
-    elevation = z0 * (1 - fy) + z1 * fy
-    
-    # Compute slope from local gradient (simplified)
-    # Use finite differences on the coarse grid
-    dx = (z01 - z00) / env.meters_per_cell
-    dy = (z10 - z00) / env.meters_per_cell
-    
-    slope_rad = np.arctan(np.sqrt(dx**2 + dy**2))
-    slope_deg = np.degrees(slope_rad)
-    
-    return slope_deg
+    # local gradient from the coarse grid at each point's cell
+    dx = (env.terrain[y0, x1] - env.terrain[y0, x0]) / env.meters_per_cell
+    dy = (env.terrain[y1, x0] - env.terrain[y0, x0]) / env.meters_per_cell
+    return np.degrees(np.arctan(np.sqrt(dx ** 2 + dy ** 2)))
+
+
+def sample_terrain_along_path(
+    start_positions: np.ndarray,
+    target: np.ndarray,
+    env: SurrogateEnv,
+    n_samples: int = 6,
+) -> np.ndarray:
+    """Worst-case terrain slope (degrees) along each path, sampled at several points.
+
+    Sampling the whole segment — not just the midpoint — is what lets the lightsim tell a route that
+    *skirts* a dune from one that *clips* it: a single-point check misses the crossing entirely.
+
+    Args:
+        start_positions: (n, 2) array of starting positions
+        target: (2,) target position
+        env: SurrogateEnv with terrain grid
+        n_samples: points sampled along each path (max slope over them is returned)
+
+    Returns:
+        (n,) array of worst-case slope values in degrees
+    """
+    target = np.asarray(target, dtype=float)
+    worst = np.zeros(len(start_positions))
+    for t in np.linspace(1.0 / n_samples, 1.0, n_samples):     # skip t=0 (the start point itself)
+        points = start_positions * (1.0 - t) + target * t
+        worst = np.maximum(worst, _slope_at(points, env))
+    return worst
 
 
 def create_surrogate_env(world, cfg: dict) -> SurrogateEnv:
