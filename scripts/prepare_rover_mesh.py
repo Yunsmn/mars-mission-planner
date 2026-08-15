@@ -4,9 +4,9 @@ Provenance: NASA's public-domain Perseverance model from the NASA 3D Resources c
 (github.com/nasa/NASA-3D-Resources — "Mars Perseverance Rover"). The distributed GLB is
 Draco-compressed; we decompress it once with `@gltf-transform/cli` (npm) into
 world/assets/perseverance_dec.glb, then this script bakes the scene-graph transforms, orients it
-Z-up, sits it on z=0, and decimates it to ~30k faces so MuJoCo loads it quickly.
+Z-up, sits it on z=0, and decimates it to ~80k faces (MuJoCo still builds it in ~0.3 s).
 
-The decimated OBJ is committed (~1.3 MB) so the render is reproducible without the raw assets.
+The decimated OBJ is committed (~3.3 MB) so the render is reproducible without the raw assets.
 Re-run only if you want to regenerate it:
 
     gltf-transform cp world/assets/perseverance.glb world/assets/perseverance_dec.glb  # decompress
@@ -19,7 +19,7 @@ import trimesh
 
 SRC = "world/assets/perseverance_dec.glb"
 OUT = "world/assets/perseverance.obj"
-KEEP_REDUCTION = 0.85     # remove 85% of faces → ~30k, plenty for a background render
+KEEP_REDUCTION = 0.6      # remove 60% of faces → ~80k; keeps thin struts/mast connected up close
 
 
 def main() -> None:
