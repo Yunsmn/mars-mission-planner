@@ -1,0 +1,65 @@
+{
+  "event": "Opportunity \u2014 Purgatory Dune (Meridiani Planum, sol 446, 26 Apr 2005)",
+  "real_stuck_sols": 38,
+  "assessed_routes": [
+    {
+      "name": "direct",
+      "waypoints": [
+        [
+          2.6,
+          0.0
+        ]
+      ],
+      "tail_risk": 1.0,
+      "length_m": 2.6,
+      "safe": false
+    },
+    {
+      "name": "detour north",
+      "waypoints": [
+        [
+          0.65,
+          1.9
+        ],
+        [
+          2.34,
+          1.9
+        ],
+        [
+          2.6,
+          0.0
+        ]
+      ],
+      "tail_risk": 1.0,
+      "length_m": 5.62,
+      "safe": false
+    },
+    {
+      "name": "detour south",
+      "waypoints": [
+        [
+          0.65,
+          -1.9
+        ],
+        [
+          2.34,
+          -1.9
+        ],
+        [
+          2.6,
+          0.0
+        ]
+      ],
+      "tail_risk": 0.094,
+      "length_m": 5.62,
+      "safe": true
+    }
+  ],
+  "decided_by": "granite",
+  "chosen_route": "detour south",
+  "rationale": "IBM Granite chose the detour south: It is the only safe route (under 10% entrapment risk).",
+  "reached": true,
+  "sampled": true,
+  "distance_m": 5.69,
+  "battery_used_pct": 4.0
+}
