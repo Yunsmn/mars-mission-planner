@@ -19,7 +19,7 @@ import numpy as np
 import yaml
 
 from common.types import MissionState, Pose
-from planner import loop, surrogate
+from planner import loop, route, surrogate
 from rover import capabilities as cap
 from world.sim import TERRAIN_RADIUS, MarsSim
 
@@ -34,6 +34,19 @@ def _ascii_map(sim, width=41, height=17):
         c = int((x + TERRAIN_RADIUS) / (2 * TERRAIN_RADIUS) * (width - 1))
         r = int((TERRAIN_RADIUS - y) / (2 * TERRAIN_RADIUS) * (height - 1))
         return max(0, min(height - 1, r)), max(0, min(width - 1, c))
+
+    # shade high ground / dunes (obstacles) as '^'
+    n = sim.terrain.shape[0]
+    lo, hi = float(sim.terrain.min()), float(sim.terrain.max())
+    thresh = lo + 0.8 * (hi - lo)
+    for rr in range(height):
+        for cc in range(width):
+            wx = -TERRAIN_RADIUS + cc / (width - 1) * 2 * TERRAIN_RADIUS
+            wy = TERRAIN_RADIUS - rr / (height - 1) * 2 * TERRAIN_RADIUS
+            i = min(n - 1, max(0, int((wy + TERRAIN_RADIUS) / (2 * TERRAIN_RADIUS) * (n - 1))))
+            j = min(n - 1, max(0, int((wx + TERRAIN_RADIUS) / (2 * TERRAIN_RADIUS) * (n - 1))))
+            if sim.terrain[i, j] > thresh:
+                grid[rr][cc] = "^"
 
     for t in sim.targets:
         r, c = cell(*t.xy)
@@ -78,6 +91,8 @@ HELP = """commands:
   ask                 ask IBM Granite for the next action (shows plan + rationale, no execute)
   step                Granite decides AND executes one action
   run                 Granite runs the full mission autonomously
+  dune                load the Purgatory dune scenario (a soft-soil trap between rover and goal)
+  route               lightsim + Granite pick a SAFE route around the dune, then drive it
   reset               reset the mission
   help / quit"""
 
@@ -184,6 +199,33 @@ def main():
                 print(f"   {i:02d}. {d.action.kind.name:8s} {d.rationale[:90]}")
             print(f"  => {log.samples_collected}/2 samples, {len(log.decisions)} decisions, "
                   f"{'SUCCESS' if log.success else 'incomplete'}")
+            status(sim)
+        elif cmd == "dune":
+            from demo.purgatory import TARGETS, dune_terrain
+            state["sim"] = MarsSim(seed=42, terrain=dune_terrain(), targets=TARGETS)
+            cap.bind(state["sim"], 1)
+            print("  Purgatory dune scenario loaded — a dune (^) blocks the direct path to the")
+            print("  outcrop (like the ripple that stuck Opportunity for 38 sols in 2005). Try 'route'.")
+            status(state["sim"])
+        elif cmd == "route":
+            import math as _m
+            from demo.purgatory import GOAL
+            gx, gy = (float(args[0]), float(args[1])) if len(args) == 2 else GOAL
+            env = surrogate.create_surrogate_env(sim, plan_cfg)
+            print("  lightsim rolling out routes; Granite deciding ...")
+            plan = route.plan_route(sim.pose()[:2], (gx, gy), env, get_model(), plan_cfg)
+            for r in plan["assessed"]:
+                print(f"    {r['name']:14s} entrapment risk {r['tail_risk'] * 100:3.0f}%  "
+                      f"{'SAFE' if r['safe'] else 'WOULD GET STUCK'}")
+            print(f"  DECISION ({plan['decided_by'].upper()}): {plan['rationale']}")
+            print(f"  driving the {plan['chosen']} ...")
+            for wp in plan["waypoints"]:
+                cap.drive_to(*wp)
+            unc = [t for t in sim.targets if not t.collected]
+            if unc:
+                x, y, _ = sim.pose()
+                if _m.hypot(unc[0].xy[0] - x, unc[0].xy[1] - y) < 0.6:
+                    print("  ", cap.sample(unc[0].id))
             status(sim)
         elif cmd == "reset":
             state["sim"] = MarsSim(seed=42)
