@@ -219,12 +219,14 @@ def main():
                       f"{'SAFE' if r['safe'] else 'WOULD GET STUCK'}")
             print(f"  DECISION ({plan['decided_by'].upper()}): {plan['rationale']}")
             print(f"  driving the {plan['chosen']} ...")
-            for wp in plan["waypoints"]:
+            for wp in plan["waypoints"][:-1]:
                 cap.drive_to(*wp)
+            sim.drive_to_reach(*plan["waypoints"][-1])      # pull up beside the outcrop, not onto it
             unc = [t for t in sim.targets if not t.collected]
             if unc:
                 x, y, _ = sim.pose()
                 if _m.hypot(unc[0].xy[0] - x, unc[0].xy[1] - y) < 0.6:
+                    print("  reaching out the arm ...")
                     print("  ", cap.sample(unc[0].id))
             status(sim)
         elif cmd == "reset":

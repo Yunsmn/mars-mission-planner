@@ -46,8 +46,9 @@ def dune_terrain(n: int = 64) -> np.ndarray:
 def run_physics(terrain, waypoints, sample_at_goal=False) -> dict:
     sim = MarsSim(seed=42, terrain=terrain, targets=TARGETS)
     cap.bind(sim, 1)
-    for wp in waypoints:
+    for wp in waypoints[:-1]:
         sim.drive_to(*wp)
+    sim.drive_to_reach(*waypoints[-1])           # stop beside the outcrop, at arm's reach
     x, y, _ = sim.pose()
     reached = math.hypot(x - GOAL[0], y - GOAL[1]) < 0.6
     sampled = bool(sample_at_goal and reached and sim.sample("outcrop").get("success"))

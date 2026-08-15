@@ -61,8 +61,9 @@ def render_side(waypoints, terrain, sample_end: bool) -> tuple[list, bool]:
 
     for _ in range(20):
         shoot()
-    for wp in waypoints:
+    for wp in waypoints[:-1]:
         sim.drive_to(*wp)
+    sim.drive_to_reach(*waypoints[-1])           # pull up beside the outcrop, not onto it
     x, y, _ = sim.pose()
     reached = math.hypot(x - GOAL[0], y - GOAL[1]) < 0.6
     if sample_end and reached:

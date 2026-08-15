@@ -74,8 +74,9 @@ def run():
 
     for _ in range(28):              # opening hold on the rover at the start line
         shoot()
-    for wp in plan["waypoints"]:
+    for wp in plan["waypoints"][:-1]:
         sim.drive_to(*wp)
+    sim.drive_to_reach(*plan["waypoints"][-1])   # pull up beside the outcrop, not onto it
     x, y, _ = sim.pose()
     reached = math.hypot(x - GOAL[0], y - GOAL[1]) < 0.6
     sampled = bool(reached and sim.sample("outcrop").get("success"))

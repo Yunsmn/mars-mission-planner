@@ -230,6 +230,17 @@ class MarsSim:
         return {"success": math.hypot(tx - xf, ty - yf) < tol * 1.5,
                 "distance_m": travelled, "steps": steps, "battery_pct": self.battery_pct}
 
+    def drive_to_reach(self, tx: float, ty: float, standoff: float = 0.35) -> dict:
+        """Drive up to `standoff` metres SHORT of (tx, ty) and stop, facing it — so the rover parks
+        beside a sample to reach it with the arm instead of parking on top of it.
+        (standoff + drive tolerance stays inside the 0.6 m sampling reach.)"""
+        x, y, _ = self.pose()
+        d = math.hypot(tx - x, ty - y)
+        if d <= standoff:
+            return self.drive_to(x, y)
+        ux, uy = (tx - x) / d, (ty - y) / d
+        return self.drive_to(tx - ux * standoff, ty - uy * standoff)
+
     def sample(self, target_id: str, reach: float = 0.6) -> dict:
         """Pick up a sample if the rover is close enough (abstract instrument action)."""
         t = next((t for t in self.targets if t.id == target_id), None)
