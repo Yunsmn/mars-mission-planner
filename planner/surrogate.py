@@ -33,12 +33,14 @@ OBSERVE_ENERGY_WH = 0.05
 @dataclass(frozen=True)
 class SurrogateEnv:
     """Lightweight terrain model for fast rollouts."""
-    terrain: np.ndarray      # Coarse elevation grid (16-24 cells)
+    terrain: np.ndarray      # Coarse elevation grid (16-24 cells) — used for fast hazard rollouts
     meters_per_cell: float   # Grid resolution
     dust_tau: float
     traction_range: tuple[float, float]
     loc_drift_range: tuple[float, float]
     draw_mult_range: tuple[float, float]
+    terrain_full: np.ndarray | None = None   # Full-res height grid, for A* pathing (finer than rollouts)
+    mpc_full: float = 0.0
 
 
 def rollout_batch(
@@ -259,7 +261,9 @@ def create_surrogate_env(world, cfg: dict) -> SurrogateEnv:
         dust_tau=world.dust_tau,
         traction_range=traction_range,
         loc_drift_range=loc_drift_range,
-        draw_mult_range=draw_mult_range
+        draw_mult_range=draw_mult_range,
+        terrain_full=full_terrain,
+        mpc_full=2 * TERRAIN_RADIUS / (full_terrain.shape[0] - 1),
     )
 
 

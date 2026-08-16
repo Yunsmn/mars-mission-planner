@@ -1,11 +1,11 @@
-"""Live MuJoCo viewer + control console — the real 3D simulation window open, the rover moving as you
-type. This is the "MuJoCo on one side, a TUI on the other" experience: drive the rover yourself, or
-let IBM Granite route it around the Purgatory dune, and watch it happen in the physics window.
+"""Live MuJoCo window + conversational MARVIN — the real 3D simulation open, and you talk to the
+rover's onboard IBM Granite intelligence in plain language while you watch it act.
 
-The window is interactive — orbit with the mouse, scroll to zoom; it re-centres on the rover as it
-drives. Needs a display (won't work over a plain SSH session — use `demo.cli` there) and Ollama
-running for the `route` command.
+    live> what's the terrain like ahead?
+    live> collect the carbonate sample      # MARVIN drives the safe route around the dune, on screen
 
+The window is interactive (orbit with the mouse, scroll to zoom) and re-centres on the rover as it
+drives. Needs a display (use demo.cli over SSH) and Ollama running.
 Run:  .venv/bin/python -m demo.live
 """
 from __future__ import annotations
@@ -17,46 +17,47 @@ import mujoco
 import mujoco.viewer
 import yaml
 
-from demo.purgatory import GOAL, TARGETS, dune_terrain
-from planner import route, surrogate
+from demo import agent
+from demo.purgatory import TARGETS, dune_terrain
+from planner import surrogate
 from rover import capabilities as cap
 from world.sim import MarsSim
 
-STEP_PACE_S = 0.008        # small wall-clock pause per macro-step so the drive is watchable
+STEP_PACE_S = 0.008
 
-HELP = """commands:
-  route [x y]     lightsim + IBM Granite pick a SAFE route around the dune, then drive it
-  drive <x> <y>   TELEOP: drive to a coordinate — try `drive 2.6 0` to auger into the dune
-  sample [<id>]   grab the nearest reachable target (or a named one)
-  status          pose, battery, targets
-  reset           restart the scenario (keeps the window)
-  help / quit"""
+INTRO = """============================================================
+ MARVIN — live physics window. Talk to the rover's Granite AI.
+============================================================
+Just type. Try:
+  hi
+  what's the terrain like around you?
+  collect the carbonate sample     (watch it route around the dune)
+Utility: 'status' · 'reset' · 'quit'"""
 
 
 def main():
-    cfg = yaml.safe_load(open("config.yaml"))
-    plan_cfg = {**cfg["planner"], **cfg["constraints"], "energy_penalty_factor": 0.01}
+    cfg0 = yaml.safe_load(open("config.yaml"))
+    cfg = {**cfg0["planner"], **cfg0["constraints"], "energy_penalty_factor": 0.01}
     sim = MarsSim(seed=42, terrain=dune_terrain(), targets=TARGETS, render_mesh=True)
     cap.bind(sim, 1)
+    env = surrogate.create_surrogate_env(sim, cfg)
     model = {"m": None}
 
     def get_model():
         if model["m"] is None:
             from model.propose import Proposer
-            mc = cfg["model"]
-            print(f"  (loading {mc['name']} via Ollama at {mc['host']} ...)")
+            mc = cfg0["model"]
+            print(f"  (waking MARVIN — {mc['name']} via Ollama ...)")
             model["m"] = Proposer(mc["name"], mc["host"], mc["temperature"])
         return model["m"]
 
     viewer = mujoco.viewer.launch_passive(sim.model, sim.data)
     cz = float(sim.data.xpos[sim._chassis][2])
     with viewer.lock():
-        # start close so the rover fills the frame and reads as a whole rover, not distant specks
         viewer.cam.distance, viewer.cam.elevation, viewer.cam.azimuth = 1.6, -20.0, 205.0
         x, y, _ = sim.pose()
         viewer.cam.lookat[:] = [x, y, cz + 0.05]
 
-    # animate the physics window as the rover steps, and keep it centred on the rover
     orig_step = sim.step
     def step(vL, vR, n=1):
         orig_step(vL, vR, n)
@@ -70,19 +71,11 @@ def main():
 
     def status():
         x, y, yaw = sim.pose()
-        print(f"  pose=({x:+.2f}, {y:+.2f})  heading={math.degrees(yaw):+.0f}deg  "
-              f"battery={sim.battery_pct:.1f}%")
-        for t in sim.targets:
-            d = math.hypot(t.xy[0] - x, t.xy[1] - y)
-            print(f"    [{'x' if t.collected else ' '}] {t.id:10s} ({t.xy[0]:+.1f},{t.xy[1]:+.1f})  "
-                  f"{d:4.2f} m away  [{t.mineral_class}]")
+        cached = sum(t.collected for t in sim.targets)
+        print(f"  pose=({x:+.2f}, {y:+.2f})  battery={sim.battery_pct:.0f}%  "
+              f"cached={cached}/{len(sim.targets)}")
 
-    print("=" * 60)
-    print(" MARVIN — live physics window. Drive the rover, or type `route`.")
-    print("=" * 60)
-    print(HELP)
-    print("\n  The dune (soft-soil trap) sits between the rover and the outcrop at "
-          f"({GOAL[0]}, {GOAL[1]}).")
+    print(INTRO)
     status()
 
     while viewer.is_running():
@@ -93,62 +86,28 @@ def main():
         if not line:
             viewer.sync()
             continue
-        cmd, *args = line.split()
-
-        if cmd in ("quit", "exit", "q"):
+        low = line.lower()
+        if low in ("quit", "exit", "q"):
             break
-        elif cmd == "help":
-            print(HELP)
-        elif cmd == "status":
+        if low in ("status", "map"):
             status()
-        elif cmd == "drive":
-            if len(args) != 2:
-                print("  usage: drive <x> <y>")
-                continue
-            try:
-                tx, ty = float(args[0]), float(args[1])
-            except ValueError:
-                print("  x and y must be numbers")
-                continue
-            print(f"  driving to ({tx:+.1f}, {ty:+.1f}) ...")
-            r = cap.drive_to(tx, ty)
-            x, y, _ = sim.pose()
-            reached = math.hypot(x - tx, y - ty) < 0.3
-            print(f"  {'arrived' if reached else 'STALLED (dune?)'} at ({x:+.2f}, {y:+.2f})  "
-                  f"battery={sim.battery_pct:.1f}%")
-        elif cmd == "sample":
-            unc = [t for t in sim.targets if not t.collected]
-            if not unc:
-                print("  nothing left to sample")
-                continue
-            x, y, _ = sim.pose()
-            tid = args[0] if args else min(unc, key=lambda t: math.hypot(t.xy[0] - x, t.xy[1] - y)).id
-            print("  ", cap.sample(tid))
-        elif cmd == "route":
-            gx, gy = (float(args[0]), float(args[1])) if len(args) == 2 else GOAL
-            print("  lightsim rolling out routes; Granite deciding ...")
-            plan = route.plan_route(sim.pose()[:2], (gx, gy), surrogate.create_surrogate_env(sim, plan_cfg),
-                                    get_model(), plan_cfg)
-            for r in plan["assessed"]:
-                print(f"    {r['name']:14s} entrapment risk {r['tail_risk'] * 100:3.0f}%  "
-                      f"{'SAFE' if r['safe'] else 'WOULD GET STUCK'}")
-            print(f"  DECISION ({plan['decided_by'].upper()}): {plan['rationale']}")
-            print(f"  driving the {plan['chosen']} — watch the window ...")
-            for wp in plan["waypoints"][:-1]:
-                cap.drive_to(*wp)
-            sim.drive_to_reach(*plan["waypoints"][-1])      # pull up beside the outcrop, not onto it
-            unc = [t for t in sim.targets if not t.collected]
-            x, y, _ = sim.pose()
-            if unc and math.hypot(unc[0].xy[0] - x, unc[0].xy[1] - y) < 0.6:
-                print("  reaching out the arm to collect the sample ...")
-                print("  ", cap.sample(unc[0].id))
-            status()
-        elif cmd == "reset":
+            continue
+        if low == "reset":
             sim.reset()
             viewer.sync()
-            print("  scenario reset")
-        else:
-            print("  unknown command — type 'help'")
+            print("  (scenario reset)")
+            status()
+            continue
+        if low in ("help", "?"):
+            print(INTRO)
+            continue
+
+        print("  MARVIN is thinking ...")
+        say, result = agent.turn(sim, env, cfg, get_model(), line)
+        print(f"\nMARVIN: {say}")
+        if result:
+            print(result)
+            status()
         viewer.sync()
 
     viewer.close()

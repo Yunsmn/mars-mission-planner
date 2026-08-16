@@ -66,47 +66,70 @@ class Proposer:
             # Return safe fallback: HOLD action
             return [self._safe_hold()]
     
-    def decide_route(self, start, goal, obstacle, cfg: dict):
-        """Granite makes the routing call: which side to skirt the hazard, and how much clearance.
-        It reasons from the obstacle's geometry (not a scored menu). One call. The caller builds the
-        detour from Granite's decision, the lightsim verifies it, and a gate backs it up.
-        Returns (side, clearance_m, reason, parsed_ok).
+    def decide_route(self, assessed: list, goal, cfg: dict):
+        """Granite decides which A* route to drive — the distance-only 'shortest' or the slope-aware
+        'safe' — given the lightsim's entrapment-risk prediction for each. The shortest is often NOT
+        the safest. Returns (route_name, reason). The caller gates the choice for safety.
         """
-        if obstacle is None:
-            return None, None, "no obstacle detected", False
-        ox, oy, x0, x1, y0, y1 = obstacle
+        ceiling = int(cfg.get("risk_ceiling", 0.10) * 100)
+        lines = "\n".join(
+            f"- {a['name']}: {a['length_m']} m, predicted entrapment risk {a['tail_risk'] * 100:.0f}% "
+            f"({'SAFE' if a['safe'] else 'WOULD GET STUCK in soft sand'})"
+            for a in assessed)
         prompt = (
-            f"You are the onboard navigator of a Mars rover at ({start[0]:.1f}, {start[1]:.1f}). "
-            f"Reach the sample outcrop at ({goal[0]:.1f}, {goal[1]:.1f}).\n"
-            f"A soft-sand dune ridge runs along x≈{ox:.1f}, spanning y {y0:.1f} to {y1:.1f}, and "
-            f"blocks the straight line. Driving onto it can bog the wheels and strand the rover for "
-            f"good — this permanently stranded NASA's Spirit rover.\n\n"
-            f"Decide how to get around it:\n"
-            f"- SIDE: 'south' to pass below the ridge (smaller y) or 'north' to pass above (larger y). "
-            f"The goal is at y={goal[1]:.1f}; pick the side that is the shorter way round.\n"
-            f"- CLEARANCE: how far past the ridge's end to swing, in meters. Use 1.5 to 2.5 — enough "
-            f"to stay well off the soft sand.\n\n"
-            f"Reply with ONLY three lines:\n"
-            f"SIDE: <south|north>\n"
-            f"CLEARANCE: <meters>\n"
-            f"REASON: <one short sentence>"
+            f"You are MARVIN, a Mars rover's onboard intelligence, reaching the sample outcrop at "
+            f"({goal[0]:.1f}, {goal[1]:.1f}). Your A* navigator found two routes over the terrain "
+            f"height map, and the lightsim rolled each out under uncertainty to predict its entrapment "
+            f"risk (the chance the wheels bog down in soft sand and the rover is stranded):\n\n{lines}\n\n"
+            f"The shortest route is often NOT the safest — driving across a soft dune permanently "
+            f"stranded NASA's Spirit rover. NEVER take a route above {ceiling}% risk. Choose which "
+            f"route to drive.\n\n"
+            f"Reply with ONLY:\nROUTE: <shortest|safe>\nREASON: <one short sentence>"
         )
         resp = self._call_ollama(prompt)
-        side, clearance, reason = None, None, ""
+        name, reason = None, ""
         for line in resp.splitlines():
             s = line.strip()
-            up = s.upper()
-            if up.startswith("SIDE:"):
-                val = up.split(":", 1)[1]
-                side = "south" if "SOUTH" in val else ("north" if "NORTH" in val else None)
-            elif up.startswith("CLEARANCE:"):
-                nums = re.findall(r"\d+\.?\d*", s.split(":", 1)[1])
-                if nums:
-                    clearance = max(0.5, min(3.0, float(nums[0])))
-            elif up.startswith("REASON:"):
+            if s.upper().startswith("ROUTE:"):
+                name = s.split(":", 1)[1].strip().lower()
+            elif s.upper().startswith("REASON:"):
                 reason = s.split(":", 1)[1].strip()
-        ok = side in ("south", "north") and clearance is not None
-        return side, clearance, (reason or f"skirting the dune on the {side} side"), ok
+        names = [a["name"] for a in assessed]
+        if name not in names:                       # model paraphrased -> match against the reply
+            hay = (name or resp or "").lower()
+            name = next((nm for nm in names if nm in hay), None)
+        return name, (reason or "based on the lightsim's entrapment predictions")
+
+    def converse(self, context: str, user_msg: str):
+        """The conversational agent brain: MARVIN answers the operator and, when asked to act, emits
+        one action. Returns (say, action) where action is 'none' | 'collect <id>' | 'goto <x> <y>'.
+        A single call — the route options are already in `context`, so it can answer and act at once.
+        """
+        prompt = (
+            f"{_SKILL}\n\n"
+            f"You are talking with a mission operator over the rover's console. Use the live readout "
+            f"below to answer; it is everything your sensors and navigator currently report.\n\n"
+            f"{context}\n\n"
+            f'OPERATOR: "{user_msg}"\n\n'
+            f"Reply with EXACTLY two lines and nothing else:\n"
+            f"SAY: <your reply to the operator, 1-2 sentences, in your voice>\n"
+            f"ACTION: <none | collect <target_id> | goto <x> <y>>\n\n"
+            f"Rules: answer questions (about the terrain, the samples, your status, or yourself) with "
+            f"ACTION: none. Only use collect/goto when the operator actually asks you to move or take "
+            f"a sample. To reach something you drive the SAFE route your navigator found, never a "
+            f"route the lightsim flags as a trap."
+        )
+        resp = self._call_ollama(prompt)
+        say, action = "", "none"
+        for line in resp.splitlines():
+            s = line.strip()
+            if s.upper().startswith("SAY:"):
+                say = s.split(":", 1)[1].strip()
+            elif s.upper().startswith("ACTION:"):
+                action = s.split(":", 1)[1].strip() or "none"
+        if not say:                                  # model ignored the format — use its prose
+            say = " ".join(resp.split())[:240] or "(no response)"
+        return say, action
 
     def _build_prompt(self, state: MissionState, perception: Perception, k: int) -> str:
         """Build the prompt for Gemma 4."""
