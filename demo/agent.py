@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 import re
 
-from planner import route, surrogate
+from planner import astar, route, surrogate
 from rover import capabilities as cap
 
 
@@ -41,10 +41,11 @@ def _sample_lines(sim, env, cfg) -> str:
     out = []
     for t in uncollected:
         dist = math.hypot(t.xy[0] - x, t.xy[1] - y)
-        paths = route.assess_paths((x, y), t.xy, env, cfg)
-        risks = " / ".join(f"{p['name']} {p['tail_risk'] * 100:.0f}% risk" for p in paths)
+        variants = route.assess_variants((x, y), t.xy, env, cfg)
+        roads = "; ".join(f"{p['name']} {p['length_m']:.1f} m/{p['tail_risk'] * 100:.0f}%" for p in variants)
         out.append(f"  - {t.id} at ({t.xy[0]:+.1f}, {t.xy[1]:+.1f}): {t.mineral_class}, "
-                   f"science {t.science_value:.2f}, {dist:.1f} m away. Routes (A* + lightsim): {risks}")
+                   f"science {t.science_value:.2f}, {dist:.1f} m away. A* roads "
+                   f"(length/entrapment-risk): {roads}")
     return "\n".join(out)
 
 
@@ -72,25 +73,33 @@ def _nearest_uncollected(sim, near=None):
     return min(unc, key=lambda t: math.hypot(t.xy[0] - ref[0], t.xy[1] - ref[1]))
 
 
-def _drive_safe(sim, env, cfg, goal, sample_id=None) -> str:
-    """Drive the lightsim-verified route to `goal` (A* safe path), reporting the shortest-vs-safe
-    contrast, then sample if asked. Uses cap.drive_to so the live viewer animates."""
-    assessed = route.assess_paths(sim.pose()[:2], goal, env, cfg)
+def _pick_route(assessed, prefer_name=None):
+    """The route to drive: Granite's named pick if it's safe, else the shortest safe road, else the
+    least-risky one (the gate)."""
     by = {a["name"]: a for a in assessed}
-    safe = by.get("safe") if by.get("safe", {}).get("safe") else \
-        min(assessed, key=lambda a: a["tail_risk"])
-    short = by.get("shortest", {})
-    lines = [f"  navigator: shortest {short.get('length_m', '?')} m at "
-             f"{short.get('tail_risk', 0) * 100:.0f}% risk; taking the safe route "
-             f"{safe['length_m']} m at {safe['tail_risk'] * 100:.0f}% risk."]
-    for wp in safe["waypoints"][:-1]:
+    if prefer_name and by.get(prefer_name, {}).get("safe"):
+        return by[prefer_name]
+    safe = [a for a in assessed if a["safe"]]
+    return min(safe, key=lambda a: a["length_m"]) if safe else min(assessed, key=lambda a: a["tail_risk"])
+
+
+def _drive_route(sim, env, cfg, goal, prefer_name=None, sample_id=None) -> str:
+    """Drive the chosen A* road to `goal` (Granite's pick if safe, else the gate's), reporting the
+    trade-off it weighed, then sample if asked. Uses cap.drive_to so the live viewer animates."""
+    assessed = route.assess_variants(sim.pose()[:2], goal, env, cfg)
+    chosen = _pick_route(assessed, prefer_name)
+    considered = ", ".join(f"{a['name']} {a['length_m']:.1f} m/{a['tail_risk'] * 100:.0f}%" for a in assessed)
+    lines = [f"  weighed {len(assessed)} roads ({considered}) -> taking '{chosen['name']}' "
+             f"({chosen['length_m']:.1f} m, {chosen['tail_risk'] * 100:.0f}% risk)."]
+    for wp in chosen["waypoints"][:-1]:
         cap.drive_to(*wp)
-    sim.drive_to_reach(*safe["waypoints"][-1])
+    sim.drive_to_reach(*chosen["waypoints"][-1])
     x, y, _ = sim.pose()
     if sample_id:
         if math.hypot(goal[0] - x, goal[1] - y) < 0.6:
             res = cap.sample(sample_id)
-            lines.append(f"  reached it and reached out the arm — {'sample cached' if res.get('success') else res.get('reason')}.")
+            lines.append(f"  reached it and reached out the arm — "
+                         f"{'sample cached' if res.get('success') else res.get('reason')}.")
         else:
             lines.append(f"  stopped {math.hypot(goal[0]-x, goal[1]-y):.1f} m away.")
     else:
@@ -107,19 +116,20 @@ def execute(sim, env, cfg, action: str) -> str | None:
     nums = re.findall(r"-?\d+\.?\d*", a)
     coords = (float(nums[0]), float(nums[1])) if len(nums) >= 2 else None
     target = _named_target(sim, a)
+    prefer = next((name for name in astar.CAUTION if name in a), None)   # Granite's chosen road
     wants_collect = "collect" in a or "sample" in a or "pick" in a
 
     if wants_collect:
         if target:
-            return _drive_safe(sim, env, cfg, target.xy, sample_id=target.id)
+            return _drive_route(sim, env, cfg, target.xy, prefer, sample_id=target.id)
         t = _nearest_uncollected(sim, near=coords)
         if t is None:
             return "  (nothing left to collect)"
-        return _drive_safe(sim, env, cfg, t.xy, sample_id=t.id)
+        return _drive_route(sim, env, cfg, t.xy, prefer, sample_id=t.id)
     if coords:                                       # goto <x> <y>
-        return _drive_safe(sim, env, cfg, coords)
+        return _drive_route(sim, env, cfg, coords, prefer)
     if target:                                       # "go to the outcrop" without coords
-        return _drive_safe(sim, env, cfg, target.xy, sample_id=target.id)
+        return _drive_route(sim, env, cfg, target.xy, prefer, sample_id=target.id)
     return None
 
 

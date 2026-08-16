@@ -76,15 +76,16 @@ class Proposer:
             f"- {a['name']}: {a['length_m']} m, predicted entrapment risk {a['tail_risk'] * 100:.0f}% "
             f"({'SAFE' if a['safe'] else 'WOULD GET STUCK in soft sand'})"
             for a in assessed)
+        names = " | ".join(a["name"] for a in assessed)
         prompt = (
             f"You are MARVIN, a Mars rover's onboard intelligence, reaching the sample outcrop at "
-            f"({goal[0]:.1f}, {goal[1]:.1f}). Your A* navigator found two routes over the terrain "
+            f"({goal[0]:.1f}, {goal[1]:.1f}). Your A* navigator found several routes over the terrain "
             f"height map, and the lightsim rolled each out under uncertainty to predict its entrapment "
             f"risk (the chance the wheels bog down in soft sand and the rover is stranded):\n\n{lines}\n\n"
-            f"The shortest route is often NOT the safest — driving across a soft dune permanently "
-            f"stranded NASA's Spirit rover. NEVER take a route above {ceiling}% risk. Choose which "
-            f"route to drive.\n\n"
-            f"Reply with ONLY:\nROUTE: <shortest|safe>\nREASON: <one short sentence>"
+            f"Choose the best trade-off. Prefer the SHORTER route when it's safe — a little risk to "
+            f"save a long detour is fine, as long as it stays at or under {ceiling}% risk. But NEVER "
+            f"take a route above {ceiling}%: crossing a soft dune permanently stranded NASA's Spirit.\n\n"
+            f"Reply with ONLY:\nROUTE: <{names}>\nREASON: <one short sentence>"
         )
         resp = self._call_ollama(prompt)
         name, reason = None, ""
@@ -113,11 +114,12 @@ class Proposer:
             f'OPERATOR: "{user_msg}"\n\n'
             f"Reply with EXACTLY two lines and nothing else:\n"
             f"SAY: <your reply to the operator, 1-2 sentences, in your voice>\n"
-            f"ACTION: <none | collect <target_id> | goto <x> <y>>\n\n"
+            f"ACTION: <none | collect <target_id> <road> | goto <x> <y> <road>>\n\n"
             f"Rules: answer questions (about the terrain, the samples, your status, or yourself) with "
             f"ACTION: none. Only use collect/goto when the operator actually asks you to move or take "
-            f"a sample. To reach something you drive the SAFE route your navigator found, never a "
-            f"route the lightsim flags as a trap."
+            f"a sample. When you do, name the A* <road> you pick from those listed for that sample "
+            f"(e.g. 'safe') — take the shortest road that is at or under the risk limit, never one the "
+            f"lightsim flags as a trap. Explain the trade-off in your SAY."
         )
         resp = self._call_ollama(prompt)
         say, action = "", "none"

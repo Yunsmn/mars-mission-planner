@@ -68,22 +68,32 @@ def obstacle_descriptor(env) -> tuple | None:
             round(min(xs), 1), round(max(xs), 1), round(min(ys), 1), round(max(ys), 1))
 
 
-def assess_paths(start, goal, env, cfg: dict) -> list[dict]:
-    """A* a distance-only 'shortest' path and a slope-aware 'safe' path over the height map, then
-    have the lightsim predict each one's entrapment risk under uncertainty. Returns both, ordered
-    [shortest, safe], each an entry with waypoints/tail_risk/length_m/safe."""
+def _route_env(env):
+    """A finer surrogate grid for route scoring, so the lightsim agrees with A*'s fine paths (the
+    default coarse mission grid smears a dune too wide to score a skirting route fairly)."""
+    terr = env.terrain_full if env.terrain_full is not None else env.terrain
+    grid = min(32, terr.shape[0])
+    coarse = surrogate.downsample_terrain(terr, grid)
+    return surrogate.SurrogateEnv(
+        terrain=coarse, meters_per_cell=2 * R / (grid - 1), dust_tau=env.dust_tau,
+        traction_range=env.traction_range, loc_drift_range=env.loc_drift_range,
+        draw_mult_range=env.draw_mult_range)
+
+
+def assess_variants(start, goal, env, cfg: dict) -> list[dict]:
+    """A* several candidate roads at different caution levels, then have the lightsim predict each
+    one's entrapment risk under uncertainty. Returns an ordered list (direct → safe), each an entry
+    with name/waypoints/tail_risk/length_m/safe — the roads Granite weighs before it commits."""
     rng = np.random.default_rng(0)
     ceiling = cfg.get("risk_ceiling", 0.10)
     terr = env.terrain_full if env.terrain_full is not None else env.terrain
     mpc = env.mpc_full if env.mpc_full else env.meters_per_cell
-    paths = astar.plan_paths(start, goal, terr, mpc)
+    fenv = _route_env(env)
     out = []
-    for name in ("shortest", "safe"):
-        wps = paths[name]["waypoints"]
-        risk = assess_path(start, wps, env, cfg, rng)
-        e = {"name": name, "waypoints": wps, "tail_risk": risk,
-             "length_m": paths[name]["length_m"], "safe": risk <= ceiling}
-        out.append(e)
+    for v in astar.plan_variants(start, goal, terr, mpc):
+        risk = assess_path(start, v["waypoints"], fenv, cfg, rng)
+        out.append({"name": v["name"], "waypoints": v["waypoints"], "tail_risk": risk,
+                    "length_m": v["length_m"], "safe": risk <= ceiling})
     return out
 
 
@@ -93,19 +103,20 @@ def plan_route(start, goal, env, model, cfg: dict) -> dict:
     {chosen, waypoints, rationale, decided_by, assessed, obstacle}.
     """
     ceiling = cfg.get("risk_ceiling", 0.10)
-    assessed = assess_paths(start, goal, env, cfg)
+    assessed = assess_variants(start, goal, env, cfg)
     by_name = {a["name"]: a for a in assessed}
 
     chosen, decided_by, rationale = None, "gate", ""
-    if model is not None and hasattr(model, "decide_route"):
+    if model is not None and hasattr(model, "decide_route") and len(assessed) > 1:
         try:
             choice, reason = model.decide_route(assessed, goal, cfg)
         except Exception:
             choice, reason = None, ""
         if choice in by_name and by_name[choice]["safe"]:
             chosen, decided_by = by_name[choice], "granite"
-            rationale = (f"IBM Granite chose the {choice} route: {reason} The lightsim puts it at "
-                         f"{chosen['tail_risk'] * 100:.0f}% entrapment risk.")
+            rationale = (f"IBM Granite weighed {len(assessed)} routes and chose the {choice} one: "
+                         f"{reason} The lightsim puts it at {chosen['tail_risk'] * 100:.0f}% "
+                         f"entrapment risk.")
 
     if chosen is None:                          # Granite absent, unparsed, or it picked an unsafe route
         safe = [a for a in assessed if a["safe"]]

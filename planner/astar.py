@@ -19,11 +19,14 @@ import numpy as np
 from scipy.ndimage import gaussian_filter, maximum_filter
 
 R = 5.0                         # world spans [-R, R] (matches world/sim.py TERRAIN_RADIUS)
-SLOPE_REF_DEG = 8.0             # slope at which the safety penalty becomes significant
-SAFE_WEIGHT = 12.0             # how hard "safe" mode penalises slope
-HARD_SLOPE_DEG = 14.0          # above this the ground is treated as near-impassable
-HARD_MULT = 60.0
-INFLATE_M = 0.8                # keep this much clearance from steep ground (obstacle inflation)
+SLOPE_REF_DEG = 10.0            # slope where the penalty reaches ~1x the caution weight
+COST_POWER = 2.5               # penalty grows faster than linearly: gentle rises stay cheap, steep
+                               # dunes/holes get expensive — so a little climb can beat a long detour
+INFLATE_M = 0.45               # light clearance margin (obstacle inflation)
+
+# Caution levels A* searches — each is a slope-cost weight. 0 = shortest (ignore terrain); higher =
+# more willing to detour around slope. Granite picks among the resulting routes by distance vs risk.
+CAUTION = {"direct": 0.0, "balanced": 2.0, "cautious": 6.0, "safe": 16.0}
 _NB = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
 
 
@@ -51,19 +54,16 @@ def _xy_to_cell(xy, n: int) -> tuple[int, int]:
     return max(0, min(n - 1, i)), max(0, min(n - 1, j))
 
 
-def _edge_cost(hazard, mpc, a, b) -> float:
+def _edge_cost(hazard, mpc, a, b, weight) -> float:
     (ai, aj), (bi, bj) = a, b
     dist = mpc * math.hypot(bi - ai, bj - aj)
-    if hazard is None:                          # "shortest": distance only
+    if weight <= 0.0:                           # "direct": distance only, ignore terrain
         return dist
     h = max(hazard[ai, aj], hazard[bi, bj])     # inflated slope near either cell
-    penalty = 1.0 + SAFE_WEIGHT * (h / SLOPE_REF_DEG) ** 2
-    if h > HARD_SLOPE_DEG:
-        penalty *= HARD_MULT
-    return dist * penalty
+    return dist * (1.0 + weight * (h / SLOPE_REF_DEG) ** COST_POWER)
 
 
-def _astar(n, hazard, mpc, start, goal) -> list[tuple[int, int]]:
+def _astar(n, hazard, mpc, start, goal, weight) -> list[tuple[int, int]]:
     h = lambda c: mpc * math.hypot(goal[0] - c[0], goal[1] - c[1])   # admissible (distance) heuristic
     open_heap = [(h(start), 0.0, start)]
     came, gscore = {start: None}, {start: 0.0}
@@ -78,7 +78,7 @@ def _astar(n, hazard, mpc, start, goal) -> list[tuple[int, int]]:
             ni, nj = ci + di, cj + dj
             if not (0 <= ni < n and 0 <= nj < n):
                 continue
-            ng = g + _edge_cost(hazard, mpc, cur, (ni, nj))
+            ng = g + _edge_cost(hazard, mpc, cur, (ni, nj), weight)
             if ng < gscore.get((ni, nj), math.inf):
                 gscore[(ni, nj)] = ng
                 came[(ni, nj)] = cur
@@ -120,16 +120,22 @@ def _length(wps, start_xy) -> float:
     return round(d, 2)
 
 
-def plan_paths(start_xy, goal_xy, terrain: np.ndarray, meters_per_cell: float) -> dict:
-    """A* both a distance-only 'shortest' path and a slope-aware 'safe' path over the height grid.
-    Returns {'shortest': {waypoints, length_m}, 'safe': {waypoints, length_m}}."""
+def plan_variants(start_xy, goal_xy, terrain: np.ndarray, meters_per_cell: float) -> list[dict]:
+    """A* several candidate routes over the height grid, one per caution level (see CAUTION) — from
+    the distance-only 'direct' line to the terrain-avoiding 'safe' route. Identical routes are merged
+    (a small hill may not change the path; a real dune does). Returns an ordered list of
+    {name, waypoints, length_m} for the lightsim to score and Granite to choose among."""
     n = terrain.shape[0]
     start_c = _xy_to_cell(start_xy, n)
     goal_c = _xy_to_cell(goal_xy, n)
     hazard = _hazard_field(terrain, meters_per_cell)
-    out = {}
-    for name, hz in (("shortest", None), ("safe", hazard)):
-        cells = _astar(n, hz, meters_per_cell, start_c, goal_c)
+    out, seen = [], set()
+    for name, weight in CAUTION.items():
+        cells = _astar(n, hazard, meters_per_cell, start_c, goal_c, weight)
         wps = _simplify(cells, n, start_xy, goal_xy)
-        out[name] = {"waypoints": wps, "length_m": _length(wps, start_xy)}
+        key = tuple((round(x, 1), round(y, 1)) for x, y in wps)
+        if key in seen:                          # same road as a less-cautious level — skip the dup
+            continue
+        seen.add(key)
+        out.append({"name": name, "waypoints": wps, "length_m": _length(wps, start_xy)})
     return out
