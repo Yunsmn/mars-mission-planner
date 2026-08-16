@@ -3,7 +3,7 @@
   "real_stuck_sols": 38,
   "assessed_routes": [
     {
-      "name": "shortest",
+      "name": "direct",
       "waypoints": [
         [
           0.0,
@@ -19,6 +19,78 @@
       "safe": false
     },
     {
+      "name": "balanced",
+      "waypoints": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          -0.3968253968253972,
+          0.07936507936507908
+        ],
+        [
+          -0.5555555555555554,
+          1.825396825396826
+        ],
+        [
+          0.23809523809523814,
+          2.6190476190476186
+        ],
+        [
+          1.825396825396826,
+          2.6190476190476186
+        ],
+        [
+          2.6190476190476186,
+          1.825396825396826
+        ],
+        [
+          2.6,
+          0.0
+        ]
+      ],
+      "tail_risk": 0.084,
+      "length_m": 7.82,
+      "safe": true
+    },
+    {
+      "name": "cautious",
+      "waypoints": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          -0.5555555555555554,
+          0.07936507936507908
+        ],
+        [
+          -0.7142857142857144,
+          1.825396825396826
+        ],
+        [
+          0.07936507936507908,
+          2.6190476190476186
+        ],
+        [
+          1.825396825396826,
+          2.6190476190476186
+        ],
+        [
+          2.6190476190476186,
+          1.825396825396826
+        ],
+        [
+          2.6,
+          0.0
+        ]
+      ],
+      "tail_risk": 0.082,
+      "length_m": 8.13,
+      "safe": true
+    },
+    {
       "name": "safe",
       "waypoints": [
         [
@@ -26,32 +98,28 @@
           0.0
         ],
         [
-          -0.8730158730158735,
+          -0.5555555555555554,
           0.07936507936507908
         ],
         [
-          -1.3492063492063493,
-          0.5555555555555554
+          -0.8730158730158735,
+          0.3968253968253963
         ],
         [
-          -1.3492063492063493,
-          1.9841269841269842
+          -0.8730158730158735,
+          1.825396825396826
         ],
         [
-          -0.5555555555555554,
-          2.7777777777777777
+          -0.23809523809523814,
+          2.4603174603174605
         ],
         [
-          1.9841269841269842,
-          2.936507936507936
+          1.825396825396826,
+          2.6190476190476186
         ],
         [
-          2.7777777777777777,
-          2.3015873015873014
-        ],
-        [
-          2.936507936507936,
-          0.23809523809523814
+          2.6190476190476186,
+          1.825396825396826
         ],
         [
           2.6,
@@ -59,15 +127,15 @@
         ]
       ],
       "tail_risk": 0.085,
-      "length_m": 10.14,
+      "length_m": 8.35,
       "safe": true
     }
   ],
   "decided_by": "granite",
-  "chosen_route": "safe",
-  "rationale": "IBM Granite chose the safe route: The shortest route has a 100% entrapment risk, exceeding the 10% safety threshold. The lightsim puts it at 8% entrapment risk.",
+  "chosen_route": "balanced",
+  "rationale": "IBM Granite weighed 4 routes and chose the balanced one: It is the shortest safe option, minimizing detour while keeping entrapment risk at 8%. The lightsim puts it at 8% entrapment risk.",
   "reached": true,
   "sampled": true,
-  "distance_m": 10.38,
-  "battery_used_pct": 7.0
+  "distance_m": 7.82,
+  "battery_used_pct": 5.5
 }

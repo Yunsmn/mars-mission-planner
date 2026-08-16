@@ -42,18 +42,23 @@ class of soft-soil trap at "Troy" in 2009 and **never escaped**. The rovers coul
 coming, because the decision to drive in was made on Earth, from orbital imagery, days ahead.
 
 MARVIN reruns that moment onboard. Its **A\* navigator** turns the DEM height grid into a
-traversability cost map (steep ground is costly whether it climbs a dune *or* drops into a hole) and
-finds two routes: a distance-only **shortest** and a slope-aware **safe**. The fast surrogate
-("lightsim") rolls each out **under uncertainty** and predicts its entrapment risk; **IBM Granite
-decides** which to drive — the shortest is not the safest — and a safety gate backs it up:
+traversability cost map — steep ground is costly whether it climbs a dune *or* drops into a hole, and
+the penalty **scales with the hazard** (a gentle rise stays cheap to cross; a real dune gets
+expensive to touch). A* searches several **candidate roads** at different caution levels; the fast
+surrogate ("lightsim") rolls each out **under uncertainty** to predict its entrapment risk; and
+**IBM Granite weighs them all** — trading distance against risk — before it commits, with a safety
+gate behind it:
 
-| A* route | Length | Entrapment risk (lightsim) | Verdict |
-|----------|:------:|:--------------------------:|---------|
-| shortest (straight at the outcrop) | 2.6 m | **100 %** | drives across the dune, would get stuck |
-| **safe (around the dune)** | 10.1 m | **8 %** | ✅ **Granite's choice** |
+| A* road | Length | Entrapment risk (lightsim) | Verdict |
+|---------|:------:|:--------------------------:|---------|
+| direct (straight at the outcrop) | 2.6 m | **100 %** | drives across the dune, would get stuck |
+| **balanced (around the dune)** | 7.8 m | **8 %** | ✅ **Granite's choice — shortest safe road** |
+| cautious | 8.1 m | 8 % | safe, but longer |
+| safe | 8.4 m | 8 % | safe, widest berth |
 
-> **Decision — IBM Granite:** *"chose the safe route: the shortest is 100 % entrapment risk, which
-> exceeds the 10 % limit. The lightsim puts the safe route at 8 %."*
+> **Decision — IBM Granite:** *"weighed 4 roads and took the balanced one — the direct line is 100 %
+> entrapment risk, and among the safe routes it's the shortest. Even though the dune is only ~0.8 m
+> high, driving onto soft sand isn't worth it."*
 
 The rover then drives the detour on full MuJoCo physics and samples the outcrop beyond the dune —
 **reached ✅, sample cached ✅, 0 sols lost** against Opportunity's 38.
