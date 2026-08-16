@@ -41,18 +41,19 @@ stuck. Freeing it took **38 sols** of careful Earth-side sandbox testing. *Spiri
 class of soft-soil trap at "Troy" in 2009 and **never escaped**. The rovers couldn't see the trap
 coming, because the decision to drive in was made on Earth, from orbital imagery, days ahead.
 
-MARVIN reruns that moment onboard. The fast surrogate ("lightsim") rolls each candidate route out
-**20× under uncertainty** and predicts its entrapment risk; **IBM Granite decides** which to take;
-a safety gate guarantees the pick is never a predicted trap:
+MARVIN reruns that moment onboard. Its **A\* navigator** turns the DEM height grid into a
+traversability cost map (steep ground is costly whether it climbs a dune *or* drops into a hole) and
+finds two routes: a distance-only **shortest** and a slope-aware **safe**. The fast surrogate
+("lightsim") rolls each out **under uncertainty** and predicts its entrapment risk; **IBM Granite
+decides** which to drive — the shortest is not the safest — and a safety gate backs it up:
 
-| Route | Entrapment risk (lightsim) | Verdict |
-|-------|:--------------------------:|---------|
-| direct (the orbital plan) | **100 %** | would get stuck |
-| detour north | **100 %** | would get stuck |
-| **detour south** | **9 %** | ✅ **safe — Granite's choice** |
+| A* route | Length | Entrapment risk (lightsim) | Verdict |
+|----------|:------:|:--------------------------:|---------|
+| shortest (straight at the outcrop) | 2.6 m | **100 %** | drives across the dune, would get stuck |
+| **safe (around the dune)** | 10.1 m | **8 %** | ✅ **Granite's choice** |
 
-> **Decision — IBM Granite:** *"chose the detour south: it is the only safe route (under 10 %
-> entrapment risk)."*
+> **Decision — IBM Granite:** *"chose the safe route: the shortest is 100 % entrapment risk, which
+> exceeds the 10 % limit. The lightsim puts the safe route at 8 %."*
 
 The rover then drives the detour on full MuJoCo physics and samples the outcrop beyond the dune —
 **reached ✅, sample cached ✅, 0 sols lost** against Opportunity's 38.
@@ -111,6 +112,17 @@ a Mars heightfield, runs once); the surrogate is the planner's *imagination* (ch
 per decision). The surrogate's uncertainty is calibrated from — and measured against — the
 MuJoCo world (the ~3% fidelity number above). Full design in [`docs/DESIGN.md`](docs/DESIGN.md).
 
+**Navigation is A\*, judgment is Granite.** Path-finding is a solved problem, so MARVIN doesn't ask
+a language model to invent coordinates — it runs **A\*** ([`planner/astar.py`](planner/astar.py))
+over the DEM cost map to produce a shortest and a safe route, the lightsim scores each under
+uncertainty, and **Granite makes the call** (which route, when to sample, which target) and explains
+it. Classical search for the geometry, the LLM for the judgment, the surrogate for the verification.
+
+**MARVIN is an onboard agent.** You talk to it ([`demo/agent.py`](demo/agent.py)): it answers
+questions about the terrain and science from the live sensor readout, and turns "collect the
+carbonate sample" into a planned, verified, executed drive — Granite orchestrating its tools
+(navigator, lightsim, instrument) in one call per turn.
+
 ## Real space data
 
 MARVIN runs on **real Jezero terrain**. [`data/fetch_jezero.py`](data/fetch_jezero.py) reads the
@@ -158,20 +170,33 @@ uv venv --python 3.12 .venv
 uv pip install --python .venv -r requirements.txt
 ollama pull granite4.1:3b          # IBM Granite 4.1, local & offline
 
-.venv/bin/python -m demo.purgatory  # ⭐ the Purgatory Dune: Granite routes around the trap
+.venv/bin/python -m demo.cli        # ⭐ TALK to MARVIN (headless) — ask about the terrain, say "collect the carbonate sample"
+.venv/bin/python -m demo.live       # same, with the real MuJoCo 3D window open (needs a display)
+.venv/bin/python -m demo.purgatory  # the Purgatory Dune, headless: A* + Granite route around the trap
 .venv/bin/python -m demo.run        # full autonomous mission (Granite)
-.venv/bin/python -m demo.cli        # interactive console — try `dune` then `route` (see below)
-.venv/bin/python -m demo.scenario   # value-aware vs. naive target selection (2.3x science)
-.venv/bin/python -m demo.ablation   # no-planner vs. planner-no-sim vs. full (risk earns its place)
 .venv/bin/python -m demo.compare    # onboard vs. fixed-plan vs. Earth-in-the-loop
 .venv/bin/python -m web.render_purgatory # render the Purgatory mission video (Perseverance mesh)
 .venv/bin/python -m web.build_showcase   # build the interactive showcase page
 .venv/bin/python -m pytest          # tests
 ```
 
-**Drive it yourself.** In `demo.cli`, load the trap with `dune`, then `route` — the lightsim scores
-each path, IBM Granite picks the safe detour, and the rover drives it and samples the outcrop. Or
-teleop with `drive <x> <y>` / `sample`, and hand Granite the wheel with `ask` / `step` / `run`.
+**Talk to the rover.** `demo.cli` (and `demo.live`, with the 3D window) drop you into a conversation
+with **MARVIN**, the rover's onboard Granite intelligence:
+
+```
+you> hi
+MARVIN: Hello, I'm MARVIN, the onboard AI controlling this Mars rover. My mission is to
+        autonomously navigate and collect high-value samples while avoiding hazards.
+you> what's the terrain like around you?
+MARVIN: There's a soft-sand dune ridge ahead along x≈1.0 — driving onto it could strand us.
+you> collect the carbonate sample
+MARVIN: I'll take the carbonate outcrop at (2.6, 0.0) using the safe path.
+        navigator: shortest 2.6 m at 100% risk; taking the safe route 10.1 m at 8% risk.
+        reached it and reached out the arm — sample cached.
+```
+
+It reads the real space data, runs the A* navigator + lightsim, and drives the verified route — no
+teleop, no memorised commands.
 
 ## License
 
