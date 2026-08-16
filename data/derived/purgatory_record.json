@@ -3,56 +3,71 @@
   "real_stuck_sols": 38,
   "assessed_routes": [
     {
-      "name": "direct line",
-      "proposed": [],
+      "name": "shortest",
       "waypoints": [
         [
-          2.6,
+          0.0,
           0.0
+        ],
+        [
+          2.6190476190476186,
+          0.07936507936507908
         ]
       ],
       "tail_risk": 1.0,
-      "length_m": 2.6,
-      "safe": false,
-      "reason": "the orbital straight-line plan"
+      "length_m": 2.62,
+      "safe": false
     },
     {
-      "name": "Granite: south detour, 2.0 m clearance",
-      "proposed": [
-        [
-          0.65,
-          -3.0
-        ],
-        [
-          2.34,
-          -3.0
-        ]
-      ],
+      "name": "safe",
       "waypoints": [
         [
-          0.65,
-          -3.0
+          0.0,
+          0.0
         ],
         [
-          2.34,
-          -3.0
+          -0.8730158730158735,
+          0.07936507936507908
+        ],
+        [
+          -1.3492063492063493,
+          0.5555555555555554
+        ],
+        [
+          -1.3492063492063493,
+          1.9841269841269842
+        ],
+        [
+          -0.5555555555555554,
+          2.7777777777777777
+        ],
+        [
+          1.9841269841269842,
+          2.936507936507936
+        ],
+        [
+          2.7777777777777777,
+          2.3015873015873014
+        ],
+        [
+          2.936507936507936,
+          0.23809523809523814
         ],
         [
           2.6,
           0.0
         ]
       ],
-      "tail_risk": 0.093,
-      "length_m": 7.77,
-      "safe": true,
-      "reason": "Passing south allows us to stay below the ridge, keeping us at a lower y-value and minimizing clearance needed."
+      "tail_risk": 0.085,
+      "length_m": 10.14,
+      "safe": true
     }
   ],
   "decided_by": "granite",
-  "chosen_route": "Granite: south detour, 2.0 m clearance",
-  "rationale": "IBM Granite chose to skirt the dune on the south side with 2.0 m clearance: Passing south allows us to stay below the ridge, keeping us at a lower y-value and minimizing clearance needed.. The lightsim verified it at 9% entrapment risk.",
+  "chosen_route": "safe",
+  "rationale": "IBM Granite chose the safe route: The shortest route has a 100% entrapment risk, exceeding the 10% safety threshold. The lightsim puts it at 8% entrapment risk.",
   "reached": true,
   "sampled": true,
-  "distance_m": 7.97,
-  "battery_used_pct": 5.5
+  "distance_m": 10.38,
+  "battery_used_pct": 7.0
 }

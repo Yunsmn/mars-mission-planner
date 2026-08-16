@@ -16,21 +16,25 @@ import heapq
 import math
 
 import numpy as np
-from scipy.ndimage import maximum_filter
+from scipy.ndimage import gaussian_filter, maximum_filter
 
 R = 5.0                         # world spans [-R, R] (matches world/sim.py TERRAIN_RADIUS)
 SLOPE_REF_DEG = 8.0             # slope at which the safety penalty becomes significant
 SAFE_WEIGHT = 12.0             # how hard "safe" mode penalises slope
 HARD_SLOPE_DEG = 14.0          # above this the ground is treated as near-impassable
 HARD_MULT = 60.0
-INFLATE_M = 1.0                # keep this much clearance from steep ground (obstacle inflation)
+INFLATE_M = 0.8                # keep this much clearance from steep ground (obstacle inflation)
 _NB = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
 
 
 def _hazard_field(terrain: np.ndarray, mpc: float) -> np.ndarray:
     """Per-cell slope (deg), dilated by INFLATE_M so cells NEAR steep ground also read as costly —
-    this is what makes A* leave a clearance margin instead of scraping past a dune's edge."""
-    gy, gx = np.gradient(terrain, mpc)
+    this is what makes A* leave a clearance margin instead of scraping past a dune's edge.
+
+    The height grid is smoothed first: the cost map cares about real relief (dunes, holes), not the
+    centimetre surface noise that would otherwise make A* zig-zag into a jagged, undrivable path."""
+    smooth = gaussian_filter(terrain, sigma=1.5)
+    gy, gx = np.gradient(smooth, mpc)
     slope_deg = np.degrees(np.arctan(np.hypot(gx, gy)))
     radius = max(1, round(INFLATE_M / mpc))
     return maximum_filter(slope_deg, size=2 * radius + 1)
