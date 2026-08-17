@@ -118,8 +118,9 @@ class Rover:
         else:
             yield "log", f"Stopped {math.hypot(goal[0]-x, goal[1]-y):.1f} m short — reassessing."
 
-    def answer(self, question: str):
-        """Rover-state question (relayed from HOUSTON): answered in MARVIN's voice via the existing
-        conversation path. Returns a text string to downlink."""
-        say, result = agent.turn(self.sim, self.env, self.cfg, self.model, question)
-        return say + ("\n" + result if result else "")
+    def answer(self, question: str) -> str:
+        """Rover-state question (relayed from HOUSTON): MARVIN *talks* — it describes what its sensors
+        see and reasons out loud, but does NOT drive or sample. Acting only happens on a real mission
+        (run_briefing), so chatting with the rover never makes it move."""
+        say, _action = self.model.converse(agent.build_context(self.sim, self.env, self.cfg), question)
+        return say

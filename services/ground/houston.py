@@ -26,9 +26,10 @@ _DEGRADED = "Ground segment degraded — retry your last transmission."
 
 class Houston:
     def __init__(self, backend: str | None = None, ollama_host: str = "http://localhost:11434",
-                 ollama_model: str = "granite4.1:3b"):
+                 ollama_model: str = "granite4.1:3b", temperature: float = 0.6):
         self.ollama_host = ollama_host
         self.ollama_model = ollama_model
+        self.temperature = temperature            # chat wants variety; brief() overrides low for JSON
         has_wx = bool(os.getenv("WATSONX_API_KEY") and os.getenv("WATSONX_PROJECT_ID"))
         self.backend = backend or ("watsonx" if has_wx else "ollama")
         self._wx_token = None
@@ -40,22 +41,20 @@ class Houston:
                "local Granite (dev fallback)"
 
     # ---- generation backends ----------------------------------------------------
-    def _generate(self, prompt: str, max_tokens: int = 700) -> str:
-        try:
-            return (self._watsonx(prompt, max_tokens) if self.backend == "watsonx"
-                    else self._ollama(prompt, max_tokens))
-        except Exception:
-            try:                                  # one retry, per the failure-mode spec
-                time.sleep(0.5)
-                return (self._watsonx(prompt, max_tokens) if self.backend == "watsonx"
-                        else self._ollama(prompt, max_tokens))
+    def _generate(self, prompt: str, max_tokens: int = 700, temperature: float | None = None) -> str:
+        temp = self.temperature if temperature is None else temperature
+        for attempt in range(2):                  # one retry, per the failure-mode spec
+            try:
+                return (self._watsonx(prompt, max_tokens, temp) if self.backend == "watsonx"
+                        else self._ollama(prompt, max_tokens, temp))
             except Exception:
-                return ""                         # caller emits the canned degraded line
+                time.sleep(0.5)
+        return ""                                 # caller emits the canned degraded line
 
-    def _ollama(self, prompt: str, max_tokens: int) -> str:
+    def _ollama(self, prompt: str, max_tokens: int, temperature: float) -> str:
         r = requests.post(f"{self.ollama_host}/api/generate", timeout=120, json={
             "model": self.ollama_model, "prompt": prompt, "stream": False,
-            "options": {"temperature": 0.3, "num_predict": max_tokens}})
+            "options": {"temperature": temperature, "num_predict": max_tokens}})
         r.raise_for_status()
         return r.json().get("response", "")
 
@@ -71,17 +70,19 @@ class Houston:
         self._wx_token, self._wx_token_exp = tok["access_token"], time.time() + tok.get("expires_in", 3600)
         return self._wx_token
 
-    def _watsonx(self, prompt: str, max_tokens: int) -> str:
+    def _watsonx(self, prompt: str, max_tokens: int, temperature: float) -> str:
         region = os.getenv("WATSONX_REGION", "us-south")
         url = f"https://{region}.ml.cloud.ibm.com/ml/v1/text/generation?version=2024-05-01"
+        # low temp -> greedy (structured briefings); higher -> sampling (varied chat)
+        params = ({"decoding_method": "greedy"} if temperature <= 0.3
+                  else {"decoding_method": "sample", "temperature": temperature})
+        params["max_new_tokens"] = max_tokens
         r = requests.post(url, timeout=120,
                           headers={"Authorization": f"Bearer {self._watsonx_token()}",
                                    "Content-Type": "application/json"},
                           json={"model_id": os.getenv("WATSONX_MODEL_ID", "ibm/granite-3-8b-instruct"),
                                 "project_id": os.environ["WATSONX_PROJECT_ID"],
-                                "input": prompt,
-                                "parameters": {"decoding_method": "greedy",
-                                               "max_new_tokens": max_tokens}})
+                                "input": prompt, "parameters": params})
         r.raise_for_status()
         return r.json()["results"][0]["generated_text"]
 
@@ -90,17 +91,23 @@ class Houston:
         """Decide: answer here (Earth-side) or relay to MARVIN (Mars-side). Returns
         {target: 'houston'|'marvin', reply: str}. Only Mars answers Mars questions."""
         prompt = (
-            "You are HOUSTON, NASA ground control for a Mars rover. Terse, procedural radio-speak, "
-            "1-3 lines, no emoji.\n"
-            "Route this operator message. MARVIN (the rover, answers after a light-time delay) owns "
-            "anything that needs being ON the rover: terrain, sensors, battery/power, what it sees, "
-            "route options, live status. A mission objective ('get me a sample...', 'go to...', "
-            "'collect...') also goes to MARVIN (you will brief it). YOU (instant) handle general "
-            "space/Earth questions and recaps you already know.\n\n"
+            "You are HOUSTON, NASA ground control — the human-facing voice of the mission. Professional "
+            "and warm, brief radio-speak (1-3 lines), a real conversation, not a form letter. No emoji.\n\n"
+            "Decide who handles this operator message:\n"
+            "- Answer it YOURSELF (you're on Earth, instant) when it's a greeting, small talk, a thank-you, "
+            "a general space/mission question, or a status recap. Actually answer it, naturally.\n"
+            "- Relay to MARVIN (the rover, after a light-time delay) ONLY when it needs the rover: a "
+            "mission objective to carry out (collect / sample / go to / image something), OR a question "
+            "about the rover's live surroundings or state (the terrain around it, what it sees, its power, "
+            "its position, its route options).\n"
+            'Examples: "hi" -> houston. "how far is Mars right now" -> houston. "what did we do so far" '
+            '-> houston. "what does the ground look like ahead" -> marvin. "collect the carbonate sample" '
+            "-> marvin.\n\n"
             f'OPERATOR: "{message}"\n\n'
-            "Reply with EXACTLY:\n"
+            "Reply with EXACTLY two lines:\n"
             "ROUTE: <marvin|houston>\n"
-            "REPLY: <if houston, your answer; if marvin, a short relay acknowledgement>"
+            "REPLY: <if houston, your actual reply to the operator; if marvin, a natural one-line relay "
+            "acknowledgement in your own words>"
         )
         text = self._generate(prompt, 300)
         if not text:
@@ -137,7 +144,7 @@ class Houston:
         )
         prompt = base
         for attempt in range(2):
-            data = briefing.parse_model_json(self._generate(prompt, 800))
+            data = briefing.parse_model_json(self._generate(prompt, 800, temperature=0.2))
             if data is not None:
                 errs = briefing.validate(data)
                 if not errs:
