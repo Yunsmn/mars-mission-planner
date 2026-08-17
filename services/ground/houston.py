@@ -88,40 +88,43 @@ class Houston:
 
     # ---- job 1: routing ---------------------------------------------------------
     def route(self, message: str, delay_s: float = 12.0) -> dict:
-        """Decide: answer here (Earth-side) or relay to MARVIN (Mars-side). Returns
-        {target: 'houston'|'marvin', reply: str}. Only Mars answers Mars questions."""
+        """One judgment, made by the model, not by keyword rules: can HOUSTON answer this from Earth,
+        or does it need the rover? HOUSTON knows it has NO live rover telemetry, so anything about the
+        rover's real state or any order for it goes to Mars — where MARVIN's own conversation decides
+        whether to reply or to act. Returns {target: 'answer'|'brief'|'relay', reply}.
+        """
         prompt = (
-            "You are HOUSTON, NASA ground control — the human-facing voice of the mission. Professional "
-            "and warm, brief radio-speak (1-3 lines), a real conversation, not a form letter. No emoji.\n\n"
-            "Decide who handles this operator message:\n"
-            "- Answer it YOURSELF (you're on Earth, instant) when it's a greeting, small talk, a thank-you, "
-            "a general space/mission question, or a status recap. Actually answer it, naturally.\n"
-            "- Relay to MARVIN (the rover, after a light-time delay) ONLY when it needs the rover: a "
-            "mission objective to carry out (collect / sample / go to / image something), OR a question "
-            "about the rover's live surroundings or state (the terrain around it, what it sees, its power, "
-            "its position, its route options).\n"
-            'Examples: "hi" -> houston. "how far is Mars right now" -> houston. "what did we do so far" '
-            '-> houston. "what does the ground look like ahead" -> marvin. "collect the carbonate sample" '
-            "-> marvin.\n\n"
+            "You are HOUSTON, NASA ground control — the human-facing voice of the mission. Warm, brief, "
+            "real radio-speak (1-3 lines). No emoji.\n"
+            "You are on EARTH. You hold the mission plan and orbital maps, but you have NO live telemetry "
+            "from the rover — you cannot see its current battery, position, or surroundings.\n\n"
+            "Decide how to handle the operator's message:\n"
+            "- answer: you handle it yourself, right now — a greeting, thanks, a general space or mission "
+            "question, or a recap of what you already know. Actually answer it.\n"
+            "- brief: the operator wants the rover to carry out a science objective (acquire/collect/sample "
+            "a target). You will write it a mission briefing.\n"
+            "- relay: anything else that needs the rover — a question about its live state or what it sees, "
+            "or a direct order to move. MARVIN handles it on Mars and decides whether to reply or act.\n\n"
             f'OPERATOR: "{message}"\n\n'
-            "Reply with EXACTLY two lines:\n"
-            "ROUTE: <marvin|houston>\n"
-            "REPLY: <if houston, your actual reply to the operator; if marvin, a natural one-line relay "
-            "acknowledgement in your own words>"
+            "Reply with EXACTLY:\n"
+            "DECISION: <answer|brief|relay>\n"
+            "REPLY: <if answer, your reply to the operator; otherwise a natural one-line acknowledgement "
+            "that you're relaying to the rover>"
         )
         text = self._generate(prompt, 300)
         if not text:
-            return {"target": "houston", "reply": _DEGRADED}
-        target, reply = "houston", ""
+            return {"target": "answer", "reply": _DEGRADED}
+        target, reply = "answer", ""
         for line in text.splitlines():
             s = line.strip()
-            if s.upper().startswith("ROUTE:"):
-                target = "marvin" if "marvin" in s.lower() else "houston"
+            if s.upper().startswith("DECISION:"):
+                v = s.lower()
+                target = "brief" if "brief" in v else ("relay" if "relay" in v else "answer")
             elif s.upper().startswith("REPLY:"):
                 reply = s.split(":", 1)[1].strip()
-        if target == "marvin":
+        if target != "answer":
             reply = reply or "Copy. Relaying to MARVIN."
-            if "uplink" not in reply.lower():
+            if "uplink" not in reply.lower() and "window" not in reply.lower():
                 reply = f"{reply} Uplink window in {int(delay_s)}s."
         return {"target": target, "reply": reply or _DEGRADED}
 

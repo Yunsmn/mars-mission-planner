@@ -28,7 +28,6 @@ from services.rover.intent_api import Rover
 DELAY = float(os.getenv("LINK_DELAY_S", "12"))
 SCENARIO = ("Known target: carbonate outcrop at (0.0, 3.0), high science value. Surrounding terrain "
             "is rolling, mapped only by orbital DEM (no view of local soft sand).")
-MISSION_WORDS = ("collect", "sample", "acquire", "get ", "go to", "drive", "cache", "retrieve", "image")
 
 _CONSOLE = pathlib.Path(__file__).resolve().parents[2] / "console"
 _cfg0 = yaml.safe_load(open("config.yaml"))
@@ -61,6 +60,8 @@ async def broadcast(msg: dict) -> None:
 
 
 def _wire(kind: str, payload) -> dict:
+    if kind == "say":
+        return {"type": "chat", "who": "marvin", "text": payload}
     if kind in ("deviation", "panel", "telemetry", "summary"):
         return {"type": kind, "payload": payload}
     return {"type": "log", "text": payload if isinstance(payload, str) else str(payload)}
@@ -70,21 +71,53 @@ async def _chip(who: str, state: str):
     await broadcast({"type": "chip", "who": who, "state": state})
 
 
+async def _stream_downlink(gen) -> None:
+    """Run a blocking rover generator in a thread and downlink its events — the Mars->Earth light-time
+    is paid once, then the products stream (the rover already produced them; the signal is in flight)."""
+    loop = asyncio.get_running_loop()
+    q: asyncio.Queue = asyncio.Queue()
+
+    def worker():
+        try:
+            for ev in gen:
+                asyncio.run_coroutine_threadsafe(q.put(ev), loop)
+        finally:
+            asyncio.run_coroutine_threadsafe(q.put(None), loop)
+
+    loop.run_in_executor(None, worker)
+    await broadcast({"type": "comms", "dir": "downlink", "seconds": DELAY})
+    first = True
+    while True:
+        ev = await q.get()
+        if ev is None:
+            break
+        if first:
+            await asyncio.sleep(DELAY)
+            first = False
+        await broadcast(_wire(*ev))
+    await _chip("marvin", "idle")
+
+
 async def handle(text: str) -> None:
     await broadcast({"type": "chat", "who": "operator", "text": text})
+    if text.lower().strip() in ("reset", "restart", "reset world"):
+        get_rover().reset()
+        await broadcast({"type": "chat", "who": "houston", "text": "World reset. Rover at the start line."})
+        await broadcast({"type": "reset"})
+        return
     await _chip("houston", "thinking")
     r = await asyncio.to_thread(houston.route, text, DELAY)
     await _chip("houston", "speaking")
     await broadcast({"type": "chat", "who": "houston", "text": r["reply"]})
     await asyncio.sleep(0.3)
-    if r["target"] != "marvin":
+    if r["target"] == "answer":                   # HOUSTON handled it on Earth
         await _chip("houston", "idle")
         return
-    async with _channel:                         # one rover, one mission at a time
-        if any(w in text.lower() for w in MISSION_WORDS):
+    async with _channel:                          # one rover, one transmission at a time
+        if r["target"] == "brief":                # a science objective -> HOUSTON briefs, MARVIN runs it
             await run_mission(text)
-        else:
-            await run_question(text)
+        else:                                     # relay -> MARVIN's own conversation replies or acts
+            await run_command(text)
     await _chip("houston", "idle")
 
 
@@ -98,50 +131,21 @@ async def run_mission(text: str) -> None:
         return
     await broadcast({"type": "briefing", "briefing": brief})
     await _chip("houston", "relaying")
-
     await broadcast({"type": "comms", "dir": "uplink", "seconds": DELAY})
     await _chip("marvin", "transmitting")
-    await link.uplink(brief, "briefing")         # Earth -> Mars light-time
+    await link.uplink(brief, "briefing")
     await _chip("houston", "idle")
     await _chip("marvin", "thinking")
-
-    loop = asyncio.get_running_loop()
-    q: asyncio.Queue = asyncio.Queue()
-    rover = get_rover()
-    rover.reset()
-
-    def worker():
-        try:
-            for ev in rover.run_briefing(brief):
-                asyncio.run_coroutine_threadsafe(q.put(ev), loop)
-        finally:
-            asyncio.run_coroutine_threadsafe(q.put(None), loop)
-
-    loop.run_in_executor(None, worker)
-    await broadcast({"type": "comms", "dir": "downlink", "seconds": DELAY})
-    first = True
-    while True:
-        ev = await q.get()
-        if ev is None:
-            break
-        if first:
-            await asyncio.sleep(DELAY)            # Mars -> Earth light-time, once, then stream
-            first = False
-        await broadcast(_wire(*ev))
-    await _chip("marvin", "idle")
+    await _stream_downlink(get_rover().run_briefing(brief))
 
 
-async def run_question(text: str) -> None:
+async def run_command(text: str) -> None:
+    """Relay anything to MARVIN and let its own conversation decide: reply, or act and stream it."""
     await broadcast({"type": "comms", "dir": "uplink", "seconds": DELAY})
     await _chip("marvin", "transmitting")
-    await link.uplink({"q": text}, "message")
+    await link.uplink({"msg": text}, "message")
     await _chip("marvin", "thinking")
-    ans = await asyncio.to_thread(get_rover().answer, text)
-    await broadcast({"type": "comms", "dir": "downlink", "seconds": DELAY})
-    await asyncio.sleep(DELAY)
-    await _chip("marvin", "speaking")
-    await broadcast({"type": "chat", "who": "marvin", "text": ans})
-    await _chip("marvin", "idle")
+    await _stream_downlink(get_rover().run_command(text))
 
 
 @app.websocket("/ws")
