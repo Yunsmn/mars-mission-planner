@@ -33,6 +33,30 @@ def synthesize(n: int = 64, amplitude_m: float = 0.22, seed: int = 42) -> np.nda
     return field.astype(np.float64)
 
 
+def rolling(n: int = 64, seed: int = 7, relief_m: float = 0.6) -> np.ndarray:
+    """Smooth, varied Mars-like terrain (meters), n x n: a field of rounded hills and hollows —
+    ground that goes up AND down, not a wall in front of the rover. Built from a handful of Gaussian
+    features of mixed sign, width, and height, then smoothed, so some rises are gentle (cheap to
+    drive over) and a few are steep (worth going around). Fully procedural from `seed`.
+    """
+    from scipy.ndimage import gaussian_filter
+    rng = np.random.default_rng(seed)
+    r = 5.0                                        # world half-extent (matches TERRAIN_RADIUS)
+    xs = np.linspace(-r, r, n)
+    xx, yy = np.meshgrid(xs, xs)
+    z = np.zeros((n, n))
+    for _ in range(9):                             # hills (+) and hollows (-) of varied size
+        cx, cy = rng.uniform(-4.2, 4.2, size=2)
+        amp = rng.uniform(-1.0, 1.0)
+        sig = rng.uniform(0.8, 2.4)                # small sigma + big amp => a steep feature
+        z += amp * np.exp(-(((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * sig ** 2)))
+    z = gaussian_filter(z, sigma=1.0)              # keep it rounded, never jagged
+    z -= z.min()
+    if z.max() > 0:
+        z *= relief_m / z.max()
+    return z.astype(np.float64)
+
+
 def load_dem(path: str, meters_per_cell: float = 6.0) -> tuple[np.ndarray, dict]:
     """Load a prepared DEM (.npy or GeoTIFF).
     

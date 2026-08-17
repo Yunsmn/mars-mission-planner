@@ -19,7 +19,7 @@ import math
 import yaml
 
 from demo import agent
-from demo.purgatory import TARGETS, dune_terrain
+from demo import scene
 from planner import surrogate
 from rover import capabilities as cap
 from world.sim import TERRAIN_RADIUS, MarsSim
@@ -77,13 +77,14 @@ Just type. Try:
   what samples can you see?
   collect the carbonate sample
 Utility: 'map' (show the map) · 'reset' · 'quit'
-The '^' on the map is a soft-sand dune between the rover and the outcrop."""
+The terrain is varied (rolling hills/hollows); '^' marks high/steep ground — a soft-sand mound sits
+between the rover and the outcrop."""
 
 
 def main():
     cfg0 = yaml.safe_load(open("config.yaml"))
     cfg = {**cfg0["planner"], **cfg0["constraints"], "energy_penalty_factor": 0.01}
-    state = {"sim": MarsSim(seed=42, terrain=dune_terrain(), targets=TARGETS)}
+    state = {"sim": MarsSim(seed=42, terrain=scene.terrain(), targets=scene.TARGETS)}
     cap.bind(state["sim"], 1)
     env = {"e": surrogate.create_surrogate_env(state["sim"], cfg)}
     model = {"m": None}
@@ -114,7 +115,7 @@ def main():
             status(state["sim"])
             continue
         if low == "reset":
-            state["sim"] = MarsSim(seed=42, terrain=dune_terrain(), targets=TARGETS)
+            state["sim"] = MarsSim(seed=42, terrain=scene.terrain(), targets=scene.TARGETS)
             cap.bind(state["sim"], 1)
             env["e"] = surrogate.create_surrogate_env(state["sim"], cfg)
             print("  (scenario reset)")

@@ -59,8 +59,8 @@ def obstacle_descriptor(env) -> tuple | None:
     if hi - lo < 0.05:                       # no meaningful relief
         return None
     idx = np.argwhere(t > lo + 0.55 * (hi - lo))
-    if len(idx) == 0:
-        return None
+    if len(idx) == 0 or len(idx) > 0.30 * t.size:   # nothing, or high ground everywhere (not a
+        return None                                 # localized obstacle — it's just varied terrain)
     to_world = lambda i: -R + i / (n - 1) * 2 * R
     xs = [to_world(j) for _, j in idx]       # terrain is indexed [row=y, col=x]
     ys = [to_world(i) for i, _ in idx]

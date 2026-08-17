@@ -18,7 +18,7 @@ import mujoco.viewer
 import yaml
 
 from demo import agent
-from demo.purgatory import TARGETS, dune_terrain
+from demo import scene
 from planner import surrogate
 from rover import capabilities as cap
 from world.sim import MarsSim
@@ -31,14 +31,14 @@ INTRO = """============================================================
 Just type. Try:
   hi
   what's the terrain like around you?
-  collect the carbonate sample     (watch it route around the dune)
+  collect the carbonate sample     (watch it route around the steep mound)
 Utility: 'status' · 'reset' · 'quit'"""
 
 
 def main():
     cfg0 = yaml.safe_load(open("config.yaml"))
     cfg = {**cfg0["planner"], **cfg0["constraints"], "energy_penalty_factor": 0.01}
-    sim = MarsSim(seed=42, terrain=dune_terrain(), targets=TARGETS, render_mesh=True)
+    sim = MarsSim(seed=42, terrain=scene.terrain(), targets=scene.TARGETS, render_mesh=True)
     cap.bind(sim, 1)
     env = surrogate.create_surrogate_env(sim, cfg)
     model = {"m": None}

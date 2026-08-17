@@ -193,6 +193,19 @@ class MarsSim:
         yaw = math.atan2(2 * (w * zq + xq * yq), 1 - 2 * (yq * yq + zq * zq))
         return float(x), float(y), float(yaw)
 
+    def sensed_dem(self, grid: int = 48, noise_m: float = 0.02, seed: int = 1) -> np.ndarray:
+        """The rover's PERCEIVED heightmap — the true surface sampled at sensor resolution with
+        noise, NOT the ground-truth array the physics integrates. The planner (A*, lightsim) builds
+        its terrain model from this, so it plans on what it *sees*, and the surrogate is honestly a
+        model of the world rather than a copy of it."""
+        from scipy.ndimage import map_coordinates
+        n = self.terrain.shape[0]
+        idx = np.linspace(0, n - 1, grid)
+        ii, jj = np.meshgrid(idx, idx, indexing="ij")
+        sensed = map_coordinates(self.terrain, [ii.ravel(), jj.ravel()], order=1).reshape(grid, grid)
+        sensed = sensed + np.random.default_rng(seed).normal(0.0, noise_m, sensed.shape)
+        return sensed.astype(np.float64)
+
     def slope_at(self, x: float, y: float) -> float:
         n = self.terrain.shape[0]
         j = int(np.clip((x + TERRAIN_RADIUS) / (2 * TERRAIN_RADIUS) * (n - 1), 0, n - 1))

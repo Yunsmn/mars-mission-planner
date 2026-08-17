@@ -26,7 +26,7 @@ INFLATE_M = 0.45               # light clearance margin (obstacle inflation)
 
 # Caution levels A* searches — each is a slope-cost weight. 0 = shortest (ignore terrain); higher =
 # more willing to detour around slope. Granite picks among the resulting routes by distance vs risk.
-CAUTION = {"direct": 0.0, "balanced": 2.0, "cautious": 6.0, "safe": 16.0}
+CAUTION = {"direct": 0.0, "balanced": 1.5, "cautious": 4.0, "safe": 9.0}
 _NB = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
 
 

@@ -29,6 +29,14 @@ SAMPLE_ENERGY_WH = 0.4  # battery % cost per sample
 SCAN_ENERGY_WH = 0.1
 OBSERVE_ENERGY_WH = 0.05
 
+# Entrapment-hazard calibration (slope -> chance of bogging down), matched to how the MuJoCo rover
+# actually drives: it climbs gentle-to-moderate grades fine, and only soft, steep ground strands it.
+# Below SAFE the hazard is ~0; by STUCK (soft dune sand) it's near-certain. Tuned to observed
+# drivability (the rover clears ~23 deg comfortably) so the lightsim doesn't cry wolf on rolling
+# terrain — a single flat threshold made every route on varied ground read as 100%.
+SLOPE_SAFE_DEG = 18.0
+SLOPE_STUCK_DEG = 45.0
+
 
 @dataclass(frozen=True)
 class SurrogateEnv:
@@ -111,9 +119,8 @@ def rollout_batch(
             # Sample terrain along path using bilinear interpolation
             slopes = sample_terrain_along_path(positions, target, env)  # (n,)
             
-            # Hazard model: increases sharply with slope
-            # Base hazard from slope (normalized to [0, 1])
-            slope_hazard = np.clip(slopes / 25.0, 0, 1)  # 25° = high risk
+            # Hazard model: ~0 below SLOPE_SAFE, ramping to near-certain by SLOPE_STUCK (soft dune).
+            slope_hazard = np.clip((slopes - SLOPE_SAFE_DEG) / (SLOPE_STUCK_DEG - SLOPE_SAFE_DEG), 0, 1)
             
             # Combined hazard with traction uncertainty
             hazard = slope_hazard * (2.0 - traction_mult)  # poor traction increases hazard
@@ -231,18 +238,23 @@ def sample_terrain_along_path(
 
 
 def create_surrogate_env(world, cfg: dict) -> SurrogateEnv:
-    """Create a SurrogateEnv from the real world terrain.
-    
+    """Create a SurrogateEnv from the rover's PERCEIVED terrain — the surrogate is a model built from
+    what the rover senses, not a copy of the ground-truth heightfield the physics runs on.
+
     Args:
-        world: MarsSim instance with terrain
+        world: MarsSim instance (its `sensed_dem()` is the perceived map; falls back to `terrain`
+               for lightweight test doubles that don't model sensing)
         cfg: Configuration dict with uncertainty ranges
-    
+
     Returns:
         SurrogateEnv ready for rollout_batch
     """
-    # Create coarse terrain grid (16x16 or 24x24) from full DEM
-    # This is the "lightweight point cloud" derived from the real DEM
-    full_terrain = world.terrain
+    # The planner's height model comes from perception (sensed_dem), never from world.terrain directly.
+    if hasattr(world, "sensed_dem"):
+        full_terrain = world.sensed_dem(grid=cfg.get("sense_grid", 48),
+                                        noise_m=cfg.get("sense_noise_m", 0.02))
+    else:
+        full_terrain = world.terrain            # test doubles without a sensing model
     target_size = cfg.get('surrogate_grid_size', 16)
     
     # Downsample terrain while preserving local highs/lows
