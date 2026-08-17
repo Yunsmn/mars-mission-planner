@@ -111,6 +111,10 @@ async def handle(text: str) -> None:
     r = await asyncio.to_thread(houston.route, text, DELAY)
     await _chip("houston", "speaking")
     await broadcast({"type": "chat", "who": "houston", "text": r["reply"]})
+    if r.get("panel") == "weather":               # HOUSTON judged this a weather request
+        from services.ground.nasa_feeds import mars_weather
+        w = await asyncio.to_thread(mars_weather, get_rover().sim.dust_tau)
+        await broadcast({"type": "weather", "payload": w})
     await asyncio.sleep(0.3)
     if r["target"] == "answer":                   # HOUSTON handled it on Earth
         await _chip("houston", "idle")

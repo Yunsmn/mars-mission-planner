@@ -108,25 +108,29 @@ class Houston:
             f'OPERATOR: "{message}"\n\n'
             "Reply with EXACTLY:\n"
             "DECISION: <answer|brief|relay>\n"
+            "PANEL: <weather|none>   (weather ONLY if they're asking about the weather, atmosphere, "
+            "temperature, pressure, dust, or sky conditions)\n"
             "REPLY: <if answer, your reply to the operator; otherwise a natural one-line acknowledgement "
             "that you're relaying to the rover>"
         )
         text = self._generate(prompt, 300)
         if not text:
-            return {"target": "answer", "reply": _DEGRADED}
-        target, reply = "answer", ""
+            return {"target": "answer", "panel": None, "reply": _DEGRADED}
+        target, panel, reply = "answer", None, ""
         for line in text.splitlines():
             s = line.strip()
             if s.upper().startswith("DECISION:"):
                 v = s.lower()
                 target = "brief" if "brief" in v else ("relay" if "relay" in v else "answer")
+            elif s.upper().startswith("PANEL:"):
+                panel = "weather" if "weather" in s.lower() else None
             elif s.upper().startswith("REPLY:"):
                 reply = s.split(":", 1)[1].strip()
         if target != "answer":
             reply = reply or "Copy. Relaying to MARVIN."
             if "uplink" not in reply.lower() and "window" not in reply.lower():
                 reply = f"{reply} Uplink window in {int(delay_s)}s."
-        return {"target": target, "reply": reply or _DEGRADED}
+        return {"target": target, "panel": panel, "reply": reply or _DEGRADED}
 
     # ---- job 2: briefing generation ---------------------------------------------
     def brief(self, operator_intent: str, scenario_context: str, mission_id: str,

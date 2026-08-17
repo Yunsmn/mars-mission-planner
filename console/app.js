@@ -39,10 +39,28 @@ function panel(id, title, klass = "") {
   if (!p) {
     p = document.createElement("div");
     p.id = "panel-" + id; p.className = "panel " + klass;
-    p.innerHTML = `<h3>${title}</h3><div class="content"></div>`;
+    p.innerHTML = `<div class="phead"><h3></h3><span class="pctl">` +
+      `<button class="pin" title="pin (keep on reset)">PIN</button>` +
+      `<button class="rm" title="remove">✕</button></span></div><div class="content"></div>`;
+    p.querySelector(".pin").onclick = () => { p.classList.toggle("pinned");
+      p.querySelector(".pin").classList.toggle("on"); };
+    p.querySelector(".rm").onclick = () => p.remove();
     downlink.prepend(p);
   }
+  p.querySelector("h3").textContent = title;
   return p.querySelector(".content");
+}
+function renderWeather(w) {
+  const c = panel("weather", "Mars Weather");
+  const row = (k, v) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`;
+  c.innerHTML = `<table class="cmp">
+    ${row("sol", w.sol)}${row("season", w.season || "—")}
+    ${row("air temp", `${w.air_temp_min_c} to ${w.air_temp_max_c} °C`)}
+    ${row("ground temp", `${w.ground_temp_min_c} to ${w.ground_temp_max_c} °C`)}
+    ${row("pressure", `${w.pressure_pa} Pa`)}${row("sky", w.sky)}
+    ${row("sunrise / sunset", `${w.sunrise} / ${w.sunset}`)}
+    ${w.local_dust_tau != null ? row("local dust τ (rover)", w.local_dust_tau) : ""}
+    </table><div class="src">source: ${w.source}</div>`;
 }
 const riskColor = (r) => `hsl(${Math.round((1 - Math.min(r, 1)) * 130)}, 70%, 52%)`;
 
@@ -143,6 +161,13 @@ function connect() {
         const img = $("simview"); img.src = "data:image/jpeg;base64," + m.data;
         img.classList.add("live"); $("sim-empty").style.display = "none"; break;
       }
+      case "weather": renderWeather(m.payload); break;
+      case "reset":
+        document.querySelectorAll(".panel:not(.pinned)").forEach((p) => p.remove());
+        $("simview").classList.remove("live"); $("sim-empty").style.display = "";
+        if (!downlink.querySelector(".panel"))
+          downlink.innerHTML = '<div class="panel muted" id="empty">Downlink zone — MARVIN\'s products appear here.</div>';
+        break;
     }
   };
   ws.onclose = () => { addMsg("sys", "link dropped — reconnecting…", true); setTimeout(connect, 1500); };
