@@ -86,7 +86,7 @@ class Rover:
             cam.distance, cam.elevation, cam.azimuth = 7.5, -84.0, 90.0
         return cam
 
-    def _frame(self):
+    def frame(self):
         if self.renderer is None:
             return None
         try:
@@ -136,7 +136,7 @@ class Rover:
             yield "log", plan["rationale"]
 
         wps = chosen["waypoints"]
-        f0 = self._frame()
+        f0 = self.frame()
         if f0:
             yield "frame", f0
         for i, wp in enumerate(wps):
@@ -148,7 +148,7 @@ class Rover:
             else:
                 gx, gy = wp
             for _ in self.sim.drive_iter(gx, gy):
-                fr = self._frame()
+                fr = self.frame()
                 if fr:
                     yield "frame", fr
                 yield "telemetry", self.state()

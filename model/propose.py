@@ -134,6 +134,12 @@ class Proposer:
                 say = s.split(":", 1)[1].strip()
             elif s.upper().startswith("ACTION:"):
                 action = s.split(":", 1)[1].strip() or "none"
+        if "action:" in say.lower():                 # model put ACTION on the SAY line — split it out
+            i = say.lower().rfind("action:")
+            tail = say[i + 7:].strip()
+            say = say[:i].strip()
+            if tail and action == "none":
+                action = tail
         if not say:                                  # model ignored the format — use its prose
             say = " ".join(resp.split())[:240] or "(no response)"
         return say, action

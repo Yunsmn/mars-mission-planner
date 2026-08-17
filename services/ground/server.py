@@ -12,6 +12,7 @@ Run:  .venv/bin/python -m uvicorn services.ground.server:app --host 0.0.0.0 --po
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import itertools
 import os
 import pathlib
@@ -41,14 +42,50 @@ _mission_no = itertools.count(447)
 _channel = asyncio.Lock()
 _rover: Rover | None = None
 
+# ALL sim + MuJoCo-render work runs in ONE dedicated thread. The GL context is created and used in
+# that same thread (no cross-thread OpenGL = no white-noise frames), and every sim access serialises
+# through it (no data races between stepping and rendering).
+_sim_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="sim")
+
+
+async def sim_call(fn, *args):
+    """Run a sim/render operation on the dedicated sim thread."""
+    return await asyncio.get_running_loop().run_in_executor(_sim_pool, fn, *args)
+
+
+def _build_rover() -> Rover:
+    from model.propose import Proposer
+    m = _cfg0["model"]
+    return Rover(_cfg, Proposer(m["name"], m["host"], m["temperature"]))
+
 
 def get_rover() -> Rover:
-    global _rover
-    if _rover is None:
-        from model.propose import Proposer
-        m = _cfg0["model"]
-        _rover = Rover(_cfg, Proposer(m["name"], m["host"], m["temperature"]))
     return _rover
+
+
+RENDER_DT = 0.5                                  # idle live-view refresh (seconds)
+
+
+async def _render_loop():
+    """Always-on: stream the rover's current view whenever nothing else is driving. During a mission
+    the sim thread is busy driving (and yields its own frames), so this naturally pauses until it ends."""
+    while True:
+        await asyncio.sleep(RENDER_DT)
+        if _rover is None or not clients:
+            continue
+        try:
+            frame = await sim_call(_rover.frame)
+            if frame:
+                await broadcast({"type": "frame", "data": frame})
+        except Exception:
+            pass
+
+
+@app.on_event("startup")
+async def _startup():
+    global _rover
+    _rover = await sim_call(_build_rover)         # sim + GL renderer created ON the sim thread
+    asyncio.create_task(_render_loop())
 
 
 async def broadcast(msg: dict) -> None:
@@ -69,6 +106,13 @@ def _wire(kind: str, payload) -> dict:
     return {"type": "log", "text": payload if isinstance(payload, str) else str(payload)}
 
 
+def _weather_line(w: dict) -> str:
+    src = w["source"].split("·")[0].strip()
+    tail = f" Local dust opacity τ {w['local_dust_tau']}." if w.get("local_dust_tau") is not None else ""
+    return (f"Latest conditions ({src}): sol {w['sol']}, air {w['air_temp_min_c']} to "
+            f"{w['air_temp_max_c']} °C, pressure {w['pressure_pa']} Pa, sky {w['sky']}.{tail}")
+
+
 async def _chip(who: str, state: str):
     await broadcast({"type": "chip", "who": who, "state": state})
 
@@ -86,7 +130,7 @@ async def _stream_downlink(gen) -> None:
         finally:
             asyncio.run_coroutine_threadsafe(q.put(None), loop)
 
-    loop.run_in_executor(None, worker)
+    loop.run_in_executor(_sim_pool, worker)      # driving + rendering on the single sim thread
     await broadcast({"type": "comms", "dir": "downlink", "seconds": DELAY})
     first = True
     while True:
@@ -103,18 +147,22 @@ async def _stream_downlink(gen) -> None:
 async def handle(text: str) -> None:
     await broadcast({"type": "chat", "who": "operator", "text": text})
     if text.lower().strip() in ("reset", "restart", "reset world"):
-        get_rover().reset()
+        async with _channel:                      # don't reset mid-drive
+            await sim_call(get_rover().reset)
         await broadcast({"type": "chat", "who": "houston", "text": "World reset. Rover at the start line."})
         await broadcast({"type": "reset"})
         return
     await _chip("houston", "thinking")
     r = await asyncio.to_thread(houston.route, text, DELAY)
     await _chip("houston", "speaking")
-    await broadcast({"type": "chat", "who": "houston", "text": r["reply"]})
-    if r.get("panel") == "weather":               # HOUSTON judged this a weather request
+    if r.get("panel") == "weather":               # answer with the REAL feed + panel, never fabricate
         from services.ground.nasa_feeds import mars_weather
         w = await asyncio.to_thread(mars_weather, get_rover().sim.dust_tau)
+        await broadcast({"type": "chat", "who": "houston", "text": _weather_line(w)})
         await broadcast({"type": "weather", "payload": w})
+        await _chip("houston", "idle")
+        return
+    await broadcast({"type": "chat", "who": "houston", "text": r["reply"]})
     await asyncio.sleep(0.3)
     if r["target"] == "answer":                   # HOUSTON handled it on Earth
         await _chip("houston", "idle")
