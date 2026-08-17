@@ -213,12 +213,13 @@ class MarsSim:
         return float(self.slope[i, j])
 
     # ---- capabilities ------------------------------------------------------------
-    def drive_to(self, tx: float, ty: float, tol: float = 0.18,
-                 max_steps: int = 6000) -> dict:
-        """Skid-steer toward (tx, ty). Returns {success, distance_m, steps, battery_pct}."""
+    def drive_iter(self, tx: float, ty: float, tol: float = 0.18, max_steps: int = 6000,
+                   yield_every: int = 4):
+        """Skid-steer toward (tx, ty), yielding control every `yield_every` macro-steps so a caller
+        can render a frame mid-drive. Handles the stop + battery cost at the end. `drive_to` wraps it."""
         from rover import energy
         x0, y0, _ = self.pose()
-        steps = 0
+        steps = k = 0
         while steps < max_steps:
             x, y, yaw = self.pose()
             dx, dy = tx - x, ty - y
@@ -235,13 +236,23 @@ class MarsSim:
             vR = float(np.clip(base + turn, -30, 30))
             self.step(vL, vR, n=10)
             steps += 10
+            k += 1
+            if k % yield_every == 0:
+                yield
         self.step(0.0, 0.0, n=20)
         xf, yf, _ = self.pose()
         travelled = math.hypot(xf - x0, yf - y0)
         self.battery_pct -= energy.drive_cost_wh(travelled, self.slope_at(xf, yf), 3.0)
         self.battery_pct = max(0.0, self.battery_pct)
+
+    def drive_to(self, tx: float, ty: float, tol: float = 0.18, max_steps: int = 6000) -> dict:
+        """Skid-steer toward (tx, ty). Returns {success, distance_m, battery_pct}."""
+        x0, y0, _ = self.pose()
+        for _ in self.drive_iter(tx, ty, tol, max_steps):
+            pass
+        xf, yf, _ = self.pose()
         return {"success": math.hypot(tx - xf, ty - yf) < tol * 1.5,
-                "distance_m": travelled, "steps": steps, "battery_pct": self.battery_pct}
+                "distance_m": math.hypot(xf - x0, yf - y0), "battery_pct": self.battery_pct}
 
     def drive_to_reach(self, tx: float, ty: float, standoff: float = 0.35) -> dict:
         """Drive up to `standoff` metres SHORT of (tx, ty) and stop, facing it — so the rover parks

@@ -139,11 +139,24 @@ function connect() {
         else if (m.payload.type === "route_comparison") renderRouteCmp(m.payload);
         else if (m.payload.type === "power") renderPower(m.payload); break;
       case "summary": addMsg("marvin", `Objective complete — sample ${m.payload.sampled ? "cached" : "not cached"} via the ${m.payload.route} route. Battery ${m.payload.battery_pct}%. ${m.payload.note}`); break;
+      case "frame": {
+        const img = $("simview"); img.src = "data:image/jpeg;base64," + m.data;
+        img.classList.add("live"); $("sim-empty").style.display = "none"; break;
+      }
     }
   };
   ws.onclose = () => { addMsg("sys", "link dropped — reconnecting…", true); setTimeout(connect, 1500); };
   window._ws = ws;
 }
+
+document.querySelectorAll(".camtoggle button").forEach((b) => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".camtoggle button").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on");
+    if (window._ws && window._ws.readyState === 1)
+      window._ws.send(JSON.stringify({ type: "camera", mode: b.dataset.cam }));
+  });
+});
 
 $("form").addEventListener("submit", (e) => {
   e.preventDefault();

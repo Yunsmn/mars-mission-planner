@@ -51,7 +51,20 @@ body { background:var(--bg); color:var(--text); font-family:var(--sans);
 @keyframes travel-up { 0%{opacity:1; left:0} 100%{opacity:1; left:calc(100% - 8px)} }
 @keyframes travel-down { 0%{opacity:1; left:calc(100% - 8px)} 100%{opacity:1; left:0} }
 
-.transcript { flex:1; overflow-y:auto; padding:18px 22px; display:flex; flex-direction:column; gap:12px; }
+.simview { position:relative; flex:2 1 0; min-height:0; background:#0a0a0a;
+  border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:center; }
+.simview img { width:100%; height:100%; object-fit:contain; display:none; }
+.simview img.live { display:block; }
+.sim-empty { position:absolute; font-family:var(--mono); font-size:11px; color:var(--text3); letter-spacing:.08em; }
+.sim-tag { position:absolute; bottom:10px; left:14px; font-family:var(--mono); font-size:9.5px;
+  color:var(--text3); letter-spacing:.04em; opacity:.8; }
+.camtoggle { position:absolute; top:10px; right:12px; display:flex; gap:2px; border:1px solid var(--line);
+  border-radius:6px; overflow:hidden; }
+.camtoggle button { background:var(--layer); color:var(--text3); border:0; padding:5px 10px;
+  font-family:var(--mono); font-size:10px; letter-spacing:.06em; cursor:pointer; }
+.camtoggle button.on { background:var(--blue); color:#fff; }
+
+.transcript { flex:1 1 0; min-height:96px; overflow-y:auto; padding:14px 22px; display:flex; flex-direction:column; gap:11px; }
 .msg { display:grid; grid-template-columns:74px 1fr; gap:12px; align-items:baseline; max-width:80ch; }
 .msg .from { font-family:var(--mono); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase;
   padding-top:2px; }

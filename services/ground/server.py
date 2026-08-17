@@ -62,6 +62,8 @@ async def broadcast(msg: dict) -> None:
 def _wire(kind: str, payload) -> dict:
     if kind == "say":
         return {"type": "chat", "who": "marvin", "text": payload}
+    if kind == "frame":
+        return {"type": "frame", "data": payload}
     if kind in ("deviation", "panel", "telemetry", "summary"):
         return {"type": kind, "payload": payload}
     return {"type": "log", "text": payload if isinstance(payload, str) else str(payload)}
@@ -159,6 +161,8 @@ async def ws_endpoint(websocket: WebSocket):
             data = await websocket.receive_json()
             if data.get("type") == "operator" and str(data.get("text", "")).strip():
                 asyncio.create_task(handle(str(data["text"]).strip()))
+            elif data.get("type") == "camera":
+                get_rover().set_camera(str(data.get("mode", "satellite")))
     except WebSocketDisconnect:
         clients.discard(websocket)
 

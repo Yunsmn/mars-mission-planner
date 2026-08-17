@@ -12,13 +12,23 @@ Nothing here commands an actuator directly: motion goes through route.plan_route
 """
 from __future__ import annotations
 
+import base64
+import io
 import math
+import os
 import re
+import time
+
+os.environ.setdefault("MUJOCO_GL", "glfw")   # headless deploys should set this to egl
 
 from demo import agent, scene
 from planner import route, surrogate
 from rover import capabilities as cap
 from world.sim import MarsSim
+
+RENDER_W, RENDER_H, JPEG_Q = 480, 340, 52    # streamed satellite/chase frames
+FRAME_EVERY = 8                              # render one frame per N drive macro-steps
+FRAME_PACE_S = 0.04                          # pace the drive so it's watchable, not a blur
 
 
 def _coarse(grid, size=28):
@@ -36,12 +46,57 @@ class Rover:
     def __init__(self, cfg: dict, model=None):
         self.cfg = cfg
         self.model = model
+        self.cam_mode = "satellite"          # "satellite" (overhead) | "chase" (behind the rover)
+        self.renderer = None
         self.reset()
 
     def reset(self):
-        self.sim = MarsSim(seed=42, terrain=scene.terrain(), targets=scene.TARGETS)
+        self.sim = MarsSim(seed=42, terrain=scene.terrain(), targets=scene.TARGETS, render_mesh=True)
         cap.bind(self.sim, 1)
         self.env = surrogate.create_surrogate_env(self.sim, self.cfg)
+        self._init_renderer()
+
+    def set_camera(self, mode: str):
+        self.cam_mode = "chase" if "chase" in (mode or "").lower() else "satellite"
+
+    def _init_renderer(self):
+        if self.renderer is not None:
+            try:
+                self.renderer.close()
+            except Exception:
+                pass
+            self.renderer = None
+        try:                                  # no GL (e.g. a headless deploy without egl) -> no stream
+            import mujoco
+            self.renderer = mujoco.Renderer(self.sim.model, RENDER_H, RENDER_W)
+        except Exception:
+            self.renderer = None
+
+    def _camera(self):
+        import mujoco
+        cam = mujoco.MjvCamera()
+        cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+        x, y, yaw = self.sim.pose()
+        cz = float(self.sim.data.xpos[self.sim._chassis][2])
+        if self.cam_mode == "chase":
+            cam.lookat[:] = [x, y, cz]
+            cam.distance, cam.elevation, cam.azimuth = 2.4, -20.0, math.degrees(yaw) + 180.0
+        else:                                 # satellite: high, near-overhead, tracking the rover
+            cam.lookat[:] = [x, y, 0.1]
+            cam.distance, cam.elevation, cam.azimuth = 7.5, -84.0, 90.0
+        return cam
+
+    def _frame(self):
+        if self.renderer is None:
+            return None
+        try:
+            self.renderer.update_scene(self.sim.data, self._camera())
+            buf = io.BytesIO()
+            from PIL import Image
+            Image.fromarray(self.renderer.render()).save(buf, "JPEG", quality=JPEG_Q)
+            return base64.b64encode(buf.getvalue()).decode()
+        except Exception:
+            return None
 
     def state(self) -> dict:
         """The live numbers the console and MARVIN's answers must agree on."""
@@ -80,11 +135,24 @@ class Rover:
         else:
             yield "log", plan["rationale"]
 
-        for wp in chosen["waypoints"][:-1]:
-            cap.drive_to(*wp)
-            yield "telemetry", self.state()
-        self.sim.drive_to_reach(*chosen["waypoints"][-1])
-        yield "telemetry", self.state()
+        wps = chosen["waypoints"]
+        f0 = self._frame()
+        if f0:
+            yield "frame", f0
+        for i, wp in enumerate(wps):
+            if i == len(wps) - 1:                 # stop ~0.35 m short of the final target, facing it
+                px, py, _ = self.sim.pose()
+                d = math.hypot(wp[0] - px, wp[1] - py)
+                gx, gy = ((wp[0] - (wp[0] - px) / d * 0.35, wp[1] - (wp[1] - py) / d * 0.35)
+                          if d > 0.35 else (px, py))
+            else:
+                gx, gy = wp
+            for _ in self.sim.drive_iter(gx, gy):
+                fr = self._frame()
+                if fr:
+                    yield "frame", fr
+                yield "telemetry", self.state()
+                time.sleep(FRAME_PACE_S)
 
         x, y, _ = self.sim.pose()
         sampled = False
