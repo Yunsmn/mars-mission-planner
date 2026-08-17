@@ -33,6 +33,44 @@ actions between comms windows** — without a heavy world model, without a netwo
 blindly trusting a small model. It doesn't replace navigation or human oversight; it's the
 reasoning layer that decides *what to do next* and delegates execution.
 
+## Mission Control — two Granites, one link
+
+MARVIN now runs inside a **Mission Control web console** with two IBM Granite models in the roles
+they'd actually hold in a deep-space architecture:
+
+- **HOUSTON** — a **cloud Granite** (watsonx.ai), the *ground segment*. The chatbot you talk to,
+  instant (it's on Earth). It expands one operator sentence into a full structured **mission
+  briefing** — objectives, science rationale, constraints, and a route advisory drawn from
+  **orbital data only**.
+- **MARVIN** — the **local `granite4.1:3b`** (Ollama), the *onboard segment*, unchanged. It receives
+  the briefing over the simulated Earth–Mars link, then runs the existing perceive → propose →
+  verify → gate → execute loop on what its **own sensors** see.
+
+The split isn't a product choice — it's forced by physics: **cloud model for strategy, edge model
+for tactics, connected the only way Earth and Mars can be.** The same pattern (cloud planner + edge
+executor) is deployable in terrestrial robotics today.
+
+**The beat:** the operator types *"get me a sample from the carbonate outcrop east of the dunes."*
+HOUSTON expands it and uplinks a briefing whose orbital advisory says *drive direct — it's shortest*.
+The uplink pays the light-time. Then MARVIN's onboard cost map finds the soft-sand ridge orbit
+couldn't see, and **downlinks a deviation**: *"Negative on the direct approach — 100% entrapment
+across 20 rollouts. Taking the balanced route, 9 m at 0%."* Earth planned from orbit; the rover knew
+better. (This is the Purgatory story below, with HOUSTON playing Earth.)
+
+**Invariants** (the thesis, enforced in code): no LLM ever commands an actuator — *the model decides,
+the gate approves, the controller drives*; HOUSTON is farther from the wheels than MARVIN; route
+advisories are non-binding; and every Earth↔Mars crossing pays the delay (it lives in exactly one
+file, [`services/ground/link.py`](services/ground/link.py)).
+
+```bash
+# run the console locally (HOUSTON falls back to local Granite without watsonx keys)
+.venv/bin/python -m uvicorn services.ground.server:app --port 8000    # then open http://localhost:8000
+.venv/bin/python -m services.flow_demo                                # or watch the whole beat headless
+```
+
+The headless demos (`demo.cli`, `demo.purgatory`) remain the **offline flight build** — the console
+is the ground station on top of them.
+
 ## The moment it matters: the Purgatory Dune
 
 On **sol 446 (26 April 2005)**, NASA's *Opportunity* drove straight into a wind-shaped ripple in
