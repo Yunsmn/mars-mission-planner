@@ -43,3 +43,7 @@ web/vendor/
 
 # large 3D mesh source/derived assets (converted on demand)
 world/assets/
+
+# generated showcase pages (build artifacts; regenerate with python -m web.build_showcase)
+web/showcase.html
+web/showcase_artifact.html
