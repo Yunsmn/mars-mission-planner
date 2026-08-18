@@ -106,13 +106,6 @@ def _wire(kind: str, payload) -> dict:
     return {"type": "log", "text": payload if isinstance(payload, str) else str(payload)}
 
 
-def _weather_line(w: dict) -> str:
-    src = w["source"].split("·")[0].strip()
-    tail = f" Local dust opacity τ {w['local_dust_tau']}." if w.get("local_dust_tau") is not None else ""
-    return (f"Latest conditions ({src}): sol {w['sol']}, air {w['air_temp_min_c']} to "
-            f"{w['air_temp_max_c']} °C, pressure {w['pressure_pa']} Pa, sky {w['sky']}.{tail}")
-
-
 async def _chip(who: str, state: str):
     await broadcast({"type": "chip", "who": who, "state": state})
 
@@ -155,11 +148,15 @@ async def handle(text: str) -> None:
     await _chip("houston", "thinking")
     r = await asyncio.to_thread(houston.route, text, DELAY)
     await _chip("houston", "speaking")
-    if r.get("panel") == "weather":               # answer with the REAL feed + panel, never fabricate
+    if r.get("panel") == "weather":               # weather = on-site conditions -> ASK MARVIN + panel
         from services.ground.nasa_feeds import mars_weather
-        w = await asyncio.to_thread(mars_weather, get_rover().sim.dust_tau)
-        await broadcast({"type": "chat", "who": "houston", "text": _weather_line(w)})
-        await broadcast({"type": "weather", "payload": w})
+        ack = r["reply"] if r["target"] != "answer" else \
+            f"Relaying to MARVIN for on-site conditions — uplink window in {int(DELAY)}s."
+        await broadcast({"type": "chat", "who": "houston", "text": ack})
+        async with _channel:
+            w = await asyncio.to_thread(mars_weather, get_rover().sim.dust_tau)
+            await broadcast({"type": "weather", "payload": w})   # local reading + regional feed
+            await run_command(text)                              # MARVIN reports what its sensors read
         await _chip("houston", "idle")
         return
     await broadcast({"type": "chat", "who": "houston", "text": r["reply"]})
